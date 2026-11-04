@@ -1,0 +1,114 @@
+# Flabsheet MVP — data and storage services (SRS section 3.2, "App server")
+#   PostgreSQL : system of record
+#   Redis      : judge job streams, pub/sub, rate limits (AOF on, NFR-REL-01)
+#   RustFS     : S3-compatible storage for images, sources and problem packages
+#
+# Usage:
+#   cp .env.example .env        # then set real passwords and keys
+#   docker compose up -d
+#   docker compose ps           # postgres/redis healthy, storage-init exited 0
+#
+# Ports bind to 127.0.0.1 by default. Judge hosts must reach Redis (6379) and
+# RustFS (9000): set BIND_ADDR in .env to the app server's private IP and allow
+# only the judge network in the firewall. PostgreSQL and the RustFS console
+# should stay private.
+name: flabsheet-data
+
+services:
+  postgres:
+    image: postgres:16.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-flabsheet}
+      POSTGRES_USER: ${POSTGRES_USER:-flabsheet}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7.4.1   # same version as the judge worker's dev stack
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --requirepass
+      - ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rustfs:
+    image: rustfs/rustfs:1.0.2   # same version as the judge worker's dev stack
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?set RUSTFS_ACCESS_KEY in .env}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY in .env}
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_OBS_LOGGER_LEVEL: warn
+    volumes:
+      - rustfs-data:/data   # named volume: no chown needed (container runs as UID 10001)
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${RUSTFS_PORT:-9000}:9000"
+      - "127.0.0.1:${RUSTFS_CONSOLE_PORT:-9001}:9001"
+
+  # One-shot job: creates the two buckets from SRS section 5.2 if they are missing.
+  # Safe to re-run: `docker compose run --rm storage-init`
+  storage-init:
+    image: amazon/aws-cli:2.17.0
+    restart: "no"
+    depends_on:
+      rustfs:
+        condition: service_started
+    environment:
+      AWS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://rustfs:9000
+      BUCKETS: "assets problems"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        aws configure set default.s3.addressing_style path
+        echo "waiting for RustFS..."
+        i=0
+        until aws s3api list-buckets >/dev/null 2>&1; do
+          i=$$((i + 1))
+          if [ "$$i" -ge 30 ]; then echo "RustFS not reachable after 60 s" >&2; exit 1; fi
+          sleep 2
+        done
+        for b in $$BUCKETS; do
+          if aws s3api head-bucket --bucket "$$b" >/dev/null 2>&1; then
+            echo "bucket $$b exists"
+          else
+            aws s3api create-bucket --bucket "$$b" >/dev/null
+            echo "bucket $$b created"
+          fi
+        done
+
+volumes:
+  pg-data:
+  redis-data:
+  rustfs-data:
