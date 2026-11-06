@@ -1,0 +1,3 @@
+[submodule "judge-worker-go"]
+	path = judge-worker-go
+	url = git@github.com:User-NotExist/judge-worker-go.git
