@@ -1,0 +1,15 @@
+# Development image: source is bind-mounted at /app; node_modules and .next
+# stay in container volumes so host and container builds don't clash.
+FROM node:24-bookworm-slim
+
+COPY --from=oven/bun:1.3.14 /usr/local/bin/bun /usr/local/bin/bun
+
+ENV NEXT_TELEMETRY_DISABLED=1
+WORKDIR /app
+
+COPY package.json bun.lock ./
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --frozen-lockfile
+
+EXPOSE 3000
+CMD ["bun", "run", "dev", "--hostname", "0.0.0.0", "--port", "3000"]

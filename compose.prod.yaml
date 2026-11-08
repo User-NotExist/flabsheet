@@ -1,0 +1,47 @@
+# Flabsheet — production stack
+#
+#   cp env.example .env              # set real secrets
+#   # app settings: backend/.env and frontend/.env (copied into the images)
+#   docker compose -f compose.prod.yaml up -d --build
+#   docker compose -f compose.prod.yaml exec backend python cli.py seed-admin
+#
+# Backend and frontend bind to APP_BIND_ADDR (127.0.0.1 by default) and are
+# meant to sit behind a TLS reverse proxy. The .env files are baked in at build
+# time: rebuild (`--build`) after changing them. Never push these images.
+name: flabsheet
+
+include:
+  - path: infra/compose.yaml   # postgres, redis, rustfs, storage-init
+    env_file: .env
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: flabsheet-backend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    # Other settings come from backend/.env; these two override it because
+    # inside the container the services are reached by name, not localhost.
+    environment:
+      POSTGRES_URL: postgresql+psycopg://${POSTGRES_USER:-flabsheet}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-flabsheet}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
+    ports:
+      - "${APP_BIND_ADDR:-127.0.0.1}:${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: flabsheet-frontend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${APP_BIND_ADDR:-127.0.0.1}:${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy

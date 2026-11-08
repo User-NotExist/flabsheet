@@ -1,0 +1,54 @@
+# Flabsheet — development stack (hot reload for backend and frontend)
+#
+#   cp env.example .env              # set passwords
+#   docker compose -f compose.dev.yaml up --build
+#
+#   frontend  http://localhost:3000
+#   backend   http://localhost:8000  (docs at /docs)
+#
+# App settings live in backend/.env and frontend/.env.
+# Source is bind-mounted; rebuild (`--build`) after changing dependencies.
+# Seed the first admin:
+#   docker compose -f compose.dev.yaml exec backend python cli.py seed-admin
+name: flabsheet-dev
+
+include:
+  - path: infra/compose.yaml   # postgres, redis, rustfs, storage-init
+    env_file: .env
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    # Other settings come from backend/.env; these two override it because
+    # inside the container the services are reached by name, not localhost.
+    environment:
+      POSTGRES_URL: postgresql+psycopg://${POSTGRES_USER:-flabsheet}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-flabsheet}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    volumes:
+      - ./backend:/app
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+      - frontend-next:/app/.next
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - backend
+
+volumes:
+  frontend-node-modules:
+  frontend-next:
