@@ -18,6 +18,21 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     database_echo: bool = False
 
+    # --- sessions / auth ---
+    session_cookie_name: str = "flabsheet_session"
+    session_ttl_days: int = 7
+    # None = derive from frontend_url (Secure only when the site is served over https)
+    session_cookie_secure: bool | None = None
+    # Failed logins allowed per (login_id, client IP) inside the window before 429
+    login_rate_limit_attempts: int = 5
+    login_rate_limit_window_seconds: int = 900
+
+    @property
+    def cookie_secure(self) -> bool:
+        if self.session_cookie_secure is not None:
+            return self.session_cookie_secure
+        return self.frontend_url.startswith("https://")
+
 
 @lru_cache
 def get_settings() -> Settings:
