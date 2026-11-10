@@ -5,6 +5,7 @@ from db.session import Base, engine
 from sqlalchemy import text
 
 import db.models.user
+import db.models.operation_log
 
 app = FastAPI()
 

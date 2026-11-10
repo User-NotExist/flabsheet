@@ -10,29 +10,17 @@ from db.models.user import User
 from db.session import Base
 
 
-# Standalone sequence: partitioned tables can't use SERIAL/IDENTITY reliably
-# across Postgres versions, so ids come from nextval() as a server default.
-logs_id_seq = Sequence("logs_id_seq", metadata=Base.metadata)
-
 
 class OperationLog(Base):
     __tablename__ = "operation_logs"
 
-    # Extra table arguments for the partitioning strategy
-    __table_args__ = (
-        {"postgresql_partition_by": "RANGE (created_at)"},
-    )
-
-    # Note: created_at must be part of the primary key
     id: Mapped[int] = mapped_column(
         BigInteger,
-        logs_id_seq,
         primary_key=True,
-        server_default=logs_id_seq.next_value(),
+        autoincrement=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        primary_key=True,
         server_default=func.now(),
     )
     # Nullable so system events can be logged and history survives user deletion
