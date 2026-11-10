@@ -26,6 +26,10 @@ services:
     environment:
       POSTGRES_URL: postgresql+psycopg://${POSTGRES_USER:-flabsheet}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-flabsheet}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      # Trust X-Forwarded-For from containers on this stack's network (the
+      # frontend forwards the browser's IP), so login rate limiting and the
+      # operation log see the real client instead of the frontend container.
+      FORWARDED_ALLOW_IPS: ${STACK_SUBNET:-172.30.10.0/24}
     volumes:
       - ./backend:/app
     ports:
@@ -46,9 +50,21 @@ services:
       - frontend-next:/app/.next
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+    # Where the Next.js server reaches the backend (/api/* route handler and
+    # src/proxy.ts). The browser only talks to the frontend.
+    environment:
+      BACKEND_URL: http://backend:8000
     depends_on:
       - backend
 
 volumes:
   frontend-node-modules:
   frontend-next:
+
+# Fixed subnet so the backend can name it in FORWARDED_ALLOW_IPS. Override
+# STACK_SUBNET in .env if it collides with another network on this host.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${STACK_SUBNET:-172.30.10.0/24}
