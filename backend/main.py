@@ -24,3 +24,9 @@ with engine.begin() as conn:
 Base.metadata.create_all(engine)
 
 app.include_router(auth.router)
+
+
+@app.get("/healthz", include_in_schema=False)
+def healthz():
+    """Liveness probe for the Docker HEALTHCHECK. Does not touch Postgres or Redis."""
+    return {"status": "ok"}

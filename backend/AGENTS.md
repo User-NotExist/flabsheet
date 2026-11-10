@@ -74,5 +74,5 @@ Imports are absolute from the backend root (`from db.models.user import User`, `
 
 ## Known gaps
 
-- The production `HEALTHCHECK` (Dockerfile) requests `GET /`, but no `/` route exists, so the check probably fails. The prod frontend waits for `service_healthy`. Verify this before relying on prod compose.
+- `GET /healthz` (in `main.py`) is the liveness probe used by the production `HEALTHCHECK`. It doesn't check Postgres or Redis. Keep the route and the Dockerfile in sync, because the prod frontend waits for the backend to be `service_healthy`.
 - Nothing uses RustFS/S3 yet, and there are no tests.
