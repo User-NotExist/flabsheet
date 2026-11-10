@@ -4,6 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useState, type FormEvent } from "react";
 
+import {
+  AUTH_BUTTON_CLASS,
+  AUTH_INPUT_CLASS,
+  AuthShell,
+} from "@/components/auth/auth-shell";
 import { FormError } from "@/components/auth/form-error";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +26,7 @@ export function ChangePasswordForm() {
   const [pending, setPending] = useState(false);
   // True when the account was flagged to change its password before going on
   const [forced, setForced] = useState(false);
+  const [loginId, setLoginId] = useState<string | null>(null);
 
   // The router keeps this page mounted (hidden) after navigating away, so
   // clear the submit state and typed passwords instead of restoring them.
@@ -35,7 +41,9 @@ export function ChangePasswordForm() {
     let cancelled = false;
     getSession()
       .then((user) => {
-        if (!cancelled) setForced(user.must_change_password);
+        if (cancelled) return;
+        setForced(user.must_change_password);
+        setLoginId(user.login_id);
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 401) {
@@ -87,62 +95,89 @@ export function ChangePasswordForm() {
   }
 
   return (
-    <form
-      ref={(form) => () => form?.reset()}
-      onSubmit={handleSubmit}
-      className="flex flex-col gap-4"
+    <AuthShell
+      title="Set a new password"
+      description={
+        // Non-breaking space keeps the line's height while the session loads
+        loginId ? `Signed in as ${loginId}` : "\u00a0"
+      }
     >
-      {forced && (
-        <p className="rounded-lg bg-muted px-3 py-2 text-sm">
-          You must set a new password before you can continue.
-        </p>
-      )}
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="current_password">Current password</Label>
-        <Input
-          id="current_password"
-          name="current_password"
-          type="password"
-          autoComplete="current-password"
-          required
-          autoFocus
-        />
-      </div>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="new_password">New password</Label>
-        <Input
-          id="new_password"
-          name="new_password"
-          type="password"
-          autoComplete="new-password"
-          minLength={MIN_PASSWORD_LENGTH}
-          required
-        />
-        <p className="text-xs text-muted-foreground">
-          At least {MIN_PASSWORD_LENGTH} characters.
-        </p>
-      </div>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="confirm_password">Confirm new password</Label>
-        <Input
-          id="confirm_password"
-          name="confirm_password"
-          type="password"
-          autoComplete="new-password"
-          required
-        />
-      </div>
-      <FormError message={error} />
-      <div className="flex flex-col gap-2">
-        <Button type="submit" size="lg" disabled={pending}>
-          {pending ? "Saving…" : "Change password"}
-        </Button>
-        {!forced && (
-          <Link href="/" className={buttonVariants({ variant: "ghost", size: "lg" })}>
-            Cancel
-          </Link>
+      <form
+        ref={(form) => () => form?.reset()}
+        onSubmit={handleSubmit}
+        className="flex flex-col gap-5"
+      >
+        {forced && (
+          <p
+            role="status"
+            className="rounded-lg bg-warning px-3.5 py-2.5 text-sm leading-relaxed text-warning-foreground"
+          >
+            Your password was issued by staff. Choose your own before you
+            continue.
+          </p>
         )}
-      </div>
-    </form>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="current_password">Current password</Label>
+          <Input
+            id="current_password"
+            name="current_password"
+            type="password"
+            autoComplete="current-password"
+            className={AUTH_INPUT_CLASS}
+            required
+            autoFocus
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="new_password">New password</Label>
+          <Input
+            id="new_password"
+            name="new_password"
+            type="password"
+            autoComplete="new-password"
+            minLength={MIN_PASSWORD_LENGTH}
+            className={AUTH_INPUT_CLASS}
+            required
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="confirm_password">Repeat new password</Label>
+          <Input
+            id="confirm_password"
+            name="confirm_password"
+            type="password"
+            autoComplete="new-password"
+            className={AUTH_INPUT_CLASS}
+            required
+          />
+        </div>
+        <FormError message={error} />
+        <div className="flex flex-col gap-2">
+          <Button
+            type="submit"
+            size="lg"
+            className={AUTH_BUTTON_CLASS}
+            disabled={pending}
+          >
+            {pending ? "Saving…" : "Save password"}
+          </Button>
+          {!forced && (
+            <Link
+              href="/"
+              className={buttonVariants({
+                variant: "ghost",
+                size: "lg",
+                className: AUTH_BUTTON_CLASS,
+              })}
+            >
+              Cancel
+            </Link>
+          )}
+        </div>
+        <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">
+          Saving signs you out on every other device.
+        </p>
+      </form>
+    </AuthShell>
   );
 }

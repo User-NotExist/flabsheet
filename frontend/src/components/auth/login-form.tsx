@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useLayoutEffect, useState, type FormEvent } from "react";
 
+import { AUTH_BUTTON_CLASS, AUTH_INPUT_CLASS } from "@/components/auth/auth-shell";
 import { FormError } from "@/components/auth/form-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,13 +62,15 @@ export function LoginForm() {
     <form
       ref={(form) => () => form?.reset()}
       onSubmit={handleSubmit}
-      className="flex flex-col gap-4"
+      className="flex flex-col gap-5"
     >
       <div className="flex flex-col gap-2">
         <Label htmlFor="login_id">Login ID</Label>
         <Input
           id="login_id"
           name="login_id"
+          placeholder="Student ID or staff login"
+          className={AUTH_INPUT_CLASS}
           autoComplete="username"
           autoCapitalize="none"
           spellCheck={false}
@@ -83,13 +86,17 @@ export function LoginForm() {
           name="password"
           type="password"
           autoComplete="current-password"
+          className={AUTH_INPUT_CLASS}
           required
         />
       </div>
       <FormError message={error} />
-      <Button type="submit" size="lg" disabled={pending}>
+      <Button type="submit" size="lg" className={AUTH_BUTTON_CLASS} disabled={pending}>
         {pending ? "Signing in…" : "Sign in"}
       </Button>
+      <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">
+        Forgot your password? Ask course staff to reset it.
+      </p>
     </form>
   );
 }
