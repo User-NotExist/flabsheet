@@ -17,7 +17,7 @@ from typing import Any, Optional, Union
 from sqlalchemy.orm import Session
 
 from db.models.operation_log import OperationLog
-from db.session import SessionLocal
+from db.postgres import SessionLocal
 
 Info = Union[str, Mapping[str, Any], None]
 

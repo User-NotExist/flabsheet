@@ -7,7 +7,7 @@ from sqlalchemy import BigInteger, DateTime, ForeignKey, Sequence, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.models.user import User
-from db.session import Base
+from db.postgres import Base
 
 
 

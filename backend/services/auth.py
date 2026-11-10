@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from config import settings
 from db.models.user import UserRole
-from db.session import get_database
+from db.postgres import get_database
 from services.operation_log import log_operation_now
 from services.session import SessionData, get_session
 

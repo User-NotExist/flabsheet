@@ -20,7 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import CITEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from db.session import Base
+from db.postgres import Base
 
 
 # CREATE TYPE user_role AS ENUM ('student', 'staff', 'admin');

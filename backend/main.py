@@ -1,7 +1,7 @@
 from config import settings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from db.session import Base, engine
+from db.postgres import Base, engine
 from sqlalchemy import text
 
 import db.models.user

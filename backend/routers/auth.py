@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from config import settings
 from db.models.user import User, UserRole
-from db.session import get_database
+from db.postgres import get_database
 from services.auth import CurrentSession
 from services.operation_log import log_operation, log_operation_now
 from services.rate_limit import clear_login_failures, login_retry_after, record_login_failure

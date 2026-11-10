@@ -18,7 +18,7 @@ import sys
 from argon2 import PasswordHasher
 from sqlalchemy import select, text
 
-from db.session import Base, SessionLocal, engine
+from db.postgres import Base, SessionLocal, engine
 from db.models.user import User, UserRole
 
 LOGIN_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
