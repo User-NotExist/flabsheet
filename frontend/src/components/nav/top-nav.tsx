@@ -37,10 +37,7 @@ export async function TopNav() {
   if (session.state !== "valid") return <NavBar />;
 
   const { user } = session;
-  const items = navItemsFor(user.role).map(({ label, href }) => ({
-    label,
-    href,
-  }));
+  const items = navItemsFor(user.role);
 
   return (
     <NavBar>
