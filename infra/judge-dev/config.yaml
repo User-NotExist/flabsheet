@@ -1,8 +1,8 @@
-# judge-worker settings for compose.dev.yaml, mounted at
+# judge-worker settings for compose.dev.judge.yaml, mounted at
 # /etc/judge-worker/config.yaml. The credential files are written by the
 # judge-secrets service. Production hosts use judge-worker-go/deploy/opt-judge.
 worker_id: dev-01
-slots: 2   # must equal go-judge's -parallelism in compose.dev.yaml
+slots: 2   # must equal go-judge's -parallelism in compose.dev.judge.yaml
 
 gojudge:
   url: http://127.0.0.1:5050   # judge-worker shares go-judge's network namespace
