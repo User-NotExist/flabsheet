@@ -44,6 +44,8 @@ pipeline {
 
     environment {
         COMPOSE_FILE = 'compose.prod.yaml'
+        // Never let compose silently fall back to the legacy builder
+        DOCKER_BUILDKIT = '1'
         // Host ports of the production stack. Shell variables beat the root
         // .env during compose interpolation, so these win over the credential's
         // FRONTEND_PORT/BACKEND_PORT. Inside the containers it stays 3000/8000.
@@ -80,6 +82,10 @@ pipeline {
                     set -eu
                     docker version --format 'docker {{.Server.Version}}'
                     docker compose version
+                    # The Dockerfiles use RUN --mount (BuildKit only). Without the
+                    # buildx plugin compose falls back to the legacy builder, which
+                    # dies at that step with no useful message, so fail here instead.
+                    docker buildx version
                     # Fails on a missing required variable (the :? defaults) before building.
                     # --quiet keeps the resolved config, secrets included, out of the log.
                     docker compose config --quiet
