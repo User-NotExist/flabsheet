@@ -185,7 +185,10 @@ pipeline {
                 }
             }
         }
-        always {
+        // cleanup, not always: Jenkins runs always before failure, so the
+        // .env files would be gone when dumpLogs() needs them to interpolate
+        // compose.prod.yaml. cleanup runs after every other post condition.
+        cleanup {
             // The images and the running stack already have the settings;
             // don't leave secrets lying around in the workspace.
             sh 'rm -f .env backend/.env frontend/.env'
