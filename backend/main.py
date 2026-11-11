@@ -11,8 +11,10 @@ import db.models.problem
 import db.models.submission
 import db.models.instance_settings
 from routers import auth
+from services.errors import ApiError, api_error_handler
 
 app = FastAPI()
+app.add_exception_handler(ApiError, api_error_handler)
 
 app.add_middleware(
     CORSMiddleware,

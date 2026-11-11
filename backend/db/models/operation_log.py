@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Sequence, Text, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Sequence, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.models.user import User
@@ -33,3 +33,6 @@ class OperationLog(Base):
     # One-way relationship: User has no `logs` collection, so importing
     # db.models.user alone (cli.py, main.py) still configures mappers cleanly.
     user: Mapped[Optional[User]] = relationship()
+
+# Newest-first log listing
+Index("operation_logs_created_at_idx", OperationLog.created_at.desc())

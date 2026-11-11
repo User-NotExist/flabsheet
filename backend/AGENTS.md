@@ -34,7 +34,8 @@ db/models/instance_settings.py  InstanceSettings (single row id=1, seeded on tab
 routers/<area>.py       APIRouter(prefix="/<area>", tags=["<area>"]); request/response Pydantic models live here
 services/auth.py        current_session / CurrentSession / require_role(...) dependencies + CSRF check
 services/session.py     session create/lookup/revoke; Postgres is the source of truth, Redis is a read cache
-services/rate_limit.py  failed-login counters in Redis
+services/rate_limit.py  failed-login counters in Redis (one per login id, one per client IP)
+services/errors.py      ApiError: an HTTPException whose body also carries a machine-readable `code`
 services/operation_log.py  log_operation / log_operation_now
 ```
 
@@ -71,7 +72,7 @@ Imports are absolute from the backend root (`from db.models.user import User`, `
 - Start modules with `from __future__ import annotations`. Type-annotate everything; use `Optional[...]`/`X | None` for nullable values.
 - A module docstring explains the design and shows a short usage example (see `services/*.py`).
 - Prefix private helpers with `_`. Put constants in `UPPER_CASE` near the top with a comment giving the reason (`MAX_PASSWORD_LENGTH = 1024  # bound the argon2 work …`).
-- Raise errors as `HTTPException(status.HTTP_..., "Sentence-case message")`. The frontend shows `detail` strings to users.
+- Raise errors as `HTTPException(status.HTTP_..., "Sentence-case message")`. The frontend shows `detail` strings to users. When the UI must tell the error apart from others with the same status, raise `ApiError(status.HTTP_..., "Message", code="snake_case")` from `services/errors.py` instead, and list the new code in `docs/srs.md` section 6.1.
 - Use `logging.getLogger(__name__)`, not `print` (except in `cli.py`, which prints and uses `sys.exit("error: …")`).
 - Keep the sync style throughout: `db.scalar(select(...))`, `db.execute(update(...))`, `db.get(Model, id)`.
 - `# type: ignore` is used sparingly to silence Pylance (e.g. `Settings()` in `config.py`). Don't spread it.
@@ -79,4 +80,5 @@ Imports are absolute from the backend root (`from db.models.user import User`, `
 ## Known gaps
 
 - `GET /healthz` (in `main.py`) is the liveness probe used by the production `HEALTHCHECK`. It doesn't check Postgres or Redis. Keep the route and the Dockerfile in sync, because the prod frontend waits for the backend to be `service_healthy`.
-- Nothing uses RustFS/S3 yet, and there are no tests.
+- Nothing uses RustFS/S3 yet, and there are no tests (deferred until after the MVP, see `docs/backend.md`).
+- Migrations (Alembic) are also deferred. Models for problems, submissions and settings exist, but no endpoint uses them yet.

@@ -30,6 +30,11 @@ export class ApiError extends Error {
     message: string,
     /** Seconds to wait before retrying (429 responses). */
     readonly retryAfter?: number,
+    /**
+     * Machine-readable error code (e.g. "rate_limited"), set only on errors
+     * the UI has to tell apart. Branch on this, never on the message.
+     */
+    readonly code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -38,17 +43,23 @@ export class ApiError extends Error {
 
 let csrfToken: string | null = null;
 
-async function errorMessage(res: Response): Promise<string> {
+async function errorBody(
+  res: Response,
+): Promise<{ message: string; code?: string }> {
+  let body: { detail?: unknown; code?: unknown } | null = null;
   try {
-    const body = await res.json();
-    // FastAPI: a string for HTTPException, a list for validation errors
-    if (typeof body?.detail === "string") return body.detail;
+    body = await res.json();
   } catch {
     // not JSON
   }
-  return res.status === 422
-    ? "Some of the values entered are not valid."
-    : `Request failed (${res.status}).`;
+  const code = typeof body?.code === "string" ? body.code : undefined;
+  // FastAPI: a string for HTTPException, a list for validation errors
+  if (typeof body?.detail === "string") return { message: body.detail, code };
+  const message =
+    res.status === 422
+      ? "Some of the values entered are not valid."
+      : `Request failed (${res.status}).`;
+  return { message, code };
 }
 
 async function request(path: string, init?: RequestInit): Promise<Response> {
@@ -60,7 +71,8 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
   }
   if (!res.ok) {
     const retryAfter = Number(res.headers.get("Retry-After")) || undefined;
-    throw new ApiError(res.status, await errorMessage(res), retryAfter);
+    const { message, code } = await errorBody(res);
+    throw new ApiError(res.status, message, retryAfter, code);
   }
   return res;
 }
