@@ -10,6 +10,8 @@ Guidance for AI coding agents working in this repo. Each part has its own file, 
 
 The design lives in [docs/](docs/): `srs.md` (requirements and resolved decisions), `data-and-storage.md` (schema, buckets), `backend.md` and `frontend.md` (implementation plans). Most of it is not built yet. When code and docs disagree, say so and ask instead of picking one.
 
+The page design lives in [docs/img/](docs/img/): file name shows the page title and slug. Use it as a guide/reference to build the frontend.
+
 ## What this is
 
 Flabsheet is a programming-course platform for students, staff and admins: problems, submissions, progress and a leaderboard. The current code covers auth (login, sessions, change password, role-gated navigation) and an audit/operation log. The other nav pages (`/problems`, `/manage/students`, …) do not exist yet.
