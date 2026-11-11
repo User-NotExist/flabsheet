@@ -6,6 +6,10 @@ from sqlalchemy import text
 
 import db.models.user
 import db.models.operation_log
+import db.models.student_import
+import db.models.problem
+import db.models.submission
+import db.models.instance_settings
 from routers import auth
 
 app = FastAPI()

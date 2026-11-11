@@ -27,6 +27,10 @@ db/postgres.py          engine, SessionLocal, Base, get_database() dependency
 db/redis.py             shared redis_client (decode_responses=True, 2 s timeouts), get_redis()
 db/models/user.py       User, Session (login sessions), UserRole enum
 db/models/operation_log.py  OperationLog (audit rows)
+db/models/student_import.py StudentImport (bulk import runs; never stores passwords)
+db/models/problem.py    Problem, ProblemVersion, ProblemLanguage, TestCase, Image + ProblemStatus/BuildStatus/TestCaseVisibility enums
+db/models/submission.py Submission, SubmissionResult, JudgeEvent, JudgeOutbox, ProblemScore + SubmissionStatus enum
+db/models/instance_settings.py  InstanceSettings (single row id=1, seeded on table creation) + LeaderboardMode enum
 routers/<area>.py       APIRouter(prefix="/<area>", tags=["<area>"]); request/response Pydantic models live here
 services/auth.py        current_session / CurrentSession / require_role(...) dependencies + CSRF check
 services/session.py     session create/lookup/revoke; Postgres is the source of truth, Redis is a read cache
@@ -40,7 +44,7 @@ Imports are absolute from the backend root (`from db.models.user import User`, `
 
 - **Endpoint**: add it to `routers/<area>.py` (create the file and `app.include_router(...)` in `main.py`). Take the DB as `db: Db` (`Annotated[DbSession, Depends(get_database)]`) and the caller as `session: CurrentSession`. Restrict roles with `dependencies=[Depends(require_role(UserRole.admin))]`. Write handlers as sync `def`, not `async def`, because the whole stack is sync.
 - **Model**: add `db/models/<name>.py` with SQLAlchemy 2.0 typed `Mapped[...]` / `mapped_column(...)`, and **import it in `main.py`** (and `cli.py` if the CLI needs it) so `create_all` sees it. Postgres conventions in use:
-  - `BigInteger` ids: `Identity(always=True)` for users, `autoincrement=True` elsewhere
+  - `BigInteger` ids: `Identity(always=True)` (`GENERATED ALWAYS AS IDENTITY`). `operation_logs` is the only exception and still uses `autoincrement=True` (`BIGSERIAL`)
   - `DateTime(timezone=True)` with `server_default=func.now()`
   - `CITEXT` for case-insensitive identifiers
   - named `CheckConstraint`s (`<table>_<col>_check`)
