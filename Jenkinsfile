@@ -26,7 +26,7 @@
 //   docker compose -p flabsheet exec backend python cli.py seed-admin   # first admin, once
 
 pipeline {
-    agent { label 'flabsheet-deploy' }
+    agent { label any }
 
     options {
         // Two deploys at once would race on the same containers
