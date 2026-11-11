@@ -1,0 +1,208 @@
+# Three independent checks, one per way the app can break before it ships:
+#   backend   runs the API on the host against real Postgres and Redis
+#   frontend  builds the production bundle and serves it
+#   docker    builds every Dockerfile and brings up the production stack
+#
+# The judge-worker-go submodule is deliberately not checked out: nothing here
+# needs it, and its SSH URL would require a deploy key.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Throwaway account that only exists inside each job's database.
+  CI_ADMIN_LOGIN: ci-admin
+  CI_ADMIN_PASSWORD: ci-admin-password
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16.4
+        env:
+          POSTGRES_DB: flabsheet
+          POSTGRES_USER: flabsheet
+          POSTGRES_PASSWORD: ci-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U flabsheet -d flabsheet"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      # No password: service containers cannot override the image's command,
+      # which is the only way to pass --requirepass.
+      redis:
+        image: redis:7.4.1
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      POSTGRES_URL: postgresql+psycopg://flabsheet:ci-password@localhost:5432/flabsheet
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: 0.12.15
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      # --no-dev matches the production image, so a runtime import that is
+      # only declared as a dev dependency fails here.
+      - name: Install dependencies
+        run: uv sync --frozen --no-dev
+
+      - name: Seed admin
+        run: |
+          ADMIN_PASSWORD="$CI_ADMIN_PASSWORD" \
+            uv run --no-sync python cli.py seed-admin --login-id "$CI_ADMIN_LOGIN"
+
+      - name: Start server
+        run: |
+          nohup uv run --no-sync fastapi run main.py --host 127.0.0.1 --port 8000 \
+            > "$RUNNER_TEMP/backend.log" 2>&1 &
+          curl --fail --silent --show-error --retry 30 --retry-delay 2 \
+            --retry-connrefused --retry-all-errors http://127.0.0.1:8000/healthz
+
+      # /healthz touches neither store, so log in to exercise Postgres, Redis
+      # and password verification.
+      - name: Log in
+        run: |
+          curl --fail --silent --show-error --output /dev/null \
+            --cookie-jar "$RUNNER_TEMP/cookies" \
+            --header 'Content-Type: application/json' \
+            --data "{\"login_id\":\"$CI_ADMIN_LOGIN\",\"password\":\"$CI_ADMIN_PASSWORD\"}" \
+            http://127.0.0.1:8000/auth/login
+          curl --fail --silent --show-error --output /dev/null \
+            --cookie "$RUNNER_TEMP/cookies" http://127.0.0.1:8000/auth/me
+
+      - name: Show server log
+        if: failure()
+        run: cat "$RUNNER_TEMP/backend.log" || true
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      # Same major as the Dockerfile: bun builds, but node serves in production.
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      # Assembled the same way as the runtime stage of frontend/Dockerfile:
+      # the standalone output does not include public/ or .next/static.
+      - name: Start server
+        run: |
+          cp -r public .next/standalone/public
+          cp -r .next/static .next/standalone/.next/static
+          HOSTNAME=127.0.0.1 PORT=3000 nohup node .next/standalone/server.js \
+            > "$RUNNER_TEMP/frontend.log" 2>&1 &
+          curl --fail --silent --show-error --output /dev/null --retry 30 --retry-delay 2 \
+            --retry-connrefused --retry-all-errors http://127.0.0.1:3000/login
+
+      # No backend runs in this job, so src/proxy.ts must fail closed.
+      - name: Check auth gate redirects
+        run: |
+          location=$(curl --silent --show-error --output /dev/null \
+            --write-out '%{redirect_url}' http://127.0.0.1:3000/)
+          echo "/ redirects to: $location"
+          case "$location" in
+            */login*) ;;
+            *) exit 1 ;;
+          esac
+
+      - name: Show server log
+        if: failure()
+        run: cat "$RUNNER_TEMP/frontend.log" || true
+
+  docker:
+    name: Docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      COMPOSE_FILE: compose.prod.yaml
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Create env files from the examples
+        run: |
+          cp env.example .env
+          cp backend/.env.example backend/.env
+          cp frontend/.env.example frontend/.env
+
+      - name: Build development images
+        run: docker compose -f compose.dev.yaml build
+
+      # storage-init runs as its own step below so that its exit code fails
+      # the job directly.
+      - name: Start production stack
+        run: |
+          docker compose up --detach --build --wait --wait-timeout 180 \
+            postgres redis rustfs backend frontend
+
+      - name: Create storage buckets
+        run: docker compose run --rm storage-init
+
+      - name: Seed admin
+        run: |
+          docker compose exec -T -e ADMIN_PASSWORD="$CI_ADMIN_PASSWORD" backend \
+            python cli.py seed-admin --login-id "$CI_ADMIN_LOGIN"
+
+      # Goes through the frontend like a browser does, proving the
+      # frontend -> backend -> Postgres/Redis path across containers.
+      - name: Log in through the frontend
+        run: |
+          curl --fail --silent --show-error --output /dev/null \
+            --cookie-jar "$RUNNER_TEMP/cookies" \
+            --header 'Content-Type: application/json' \
+            --data "{\"login_id\":\"$CI_ADMIN_LOGIN\",\"password\":\"$CI_ADMIN_PASSWORD\"}" \
+            http://127.0.0.1:3000/api/auth/login
+          curl --fail --silent --show-error --output /dev/null \
+            --cookie "$RUNNER_TEMP/cookies" http://127.0.0.1:3000/api/auth/me
+
+      - name: Show container logs
+        if: failure()
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color
