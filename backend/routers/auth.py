@@ -13,6 +13,7 @@ from config import settings
 from db.models.user import User, UserRole
 from db.postgres import get_database
 from services.auth import CurrentSession
+from services.errors import ApiError
 from services.operation_log import log_operation, log_operation_now
 from services.rate_limit import clear_login_failures, login_retry_after, record_login_failure
 from services.session import (
@@ -113,9 +114,10 @@ def login(body: LoginRequest, request: Request, response: Response, db: Db):
 
     retry_after = login_retry_after(body.login_id, client_ip)
     if retry_after:
-        raise HTTPException(
+        raise ApiError(
             status.HTTP_429_TOO_MANY_REQUESTS,
             "Too many failed login attempts. Try again later.",
+            code="rate_limited",
             headers={"Retry-After": str(retry_after)},
         )
 
@@ -146,7 +148,7 @@ def login(body: LoginRequest, request: Request, response: Response, db: Db):
     log_operation(db, "auth.login", user_id=user.id, info={"ip": client_ip})
     db.commit()
     cache_session(session)
-    clear_login_failures(body.login_id, client_ip)
+    clear_login_failures(body.login_id)
 
     _set_session_cookie(response, token)
     return _auth_response(session)

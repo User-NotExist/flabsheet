@@ -9,6 +9,16 @@ export const BACKEND_URL = (
 
 const BACKEND_TIMEOUT_MS = 30_000;
 
+export type ForwardOptions = {
+  /**
+   * Set for long-lived responses such as Server-Sent Events. The usual
+   * timeout would cut the stream off after 30 s, because the abort signal
+   * also covers reading the body. The request then ends when the browser
+   * disconnects instead.
+   */
+  stream?: boolean;
+};
+
 // Request headers the backend needs; everything else (host, origin, ...) stays here.
 const FORWARDED_REQUEST_HEADERS = [
   "accept",
@@ -36,10 +46,13 @@ const DROPPED_RESPONSE_HEADERS = [
  *
  * No auth check happens here: the backend authenticates and authorizes every
  * request itself (session cookie + X-CSRF-Token), and both are passed through.
+ *
+ * Pass `{ stream: true }` for endpoints that keep the response open (SSE).
  */
 export async function forwardToBackend(
   request: Request,
   path: string,
+  options: ForwardOptions = {},
 ): Promise<Response> {
   const headers = new Headers();
   for (const name of FORWARDED_REQUEST_HEADERS) {
@@ -57,7 +70,9 @@ export async function forwardToBackend(
       body: hasBody ? await request.arrayBuffer() : undefined,
       redirect: "manual",
       cache: "no-store",
-      signal: AbortSignal.timeout(BACKEND_TIMEOUT_MS),
+      signal: options.stream
+        ? request.signal
+        : AbortSignal.timeout(BACKEND_TIMEOUT_MS),
     });
   } catch {
     return Response.json(

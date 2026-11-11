@@ -13,9 +13,11 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Identity,
+    Index,
     Text,
     event,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import CITEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -109,3 +111,8 @@ class Session(Base):
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     user: Mapped[User] = relationship(back_populates="sessions")
+
+# Revoke or invalidate all of a user's sessions
+Index("sessions_user_idx", Session.user_id, postgresql_where=text("revoked_at IS NULL"))
+# Purge expired sessions
+Index("sessions_expiry_idx", Session.expires_at)

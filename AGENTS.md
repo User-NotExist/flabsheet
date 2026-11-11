@@ -8,9 +8,11 @@ Guidance for AI coding agents working in this repo. Each part has its own file, 
 - [frontend/AGENTS.md](frontend/AGENTS.md): Next.js 16 app (App Router, shadcn/ui on Base UI)
 - [judge-worker-go/CLAUDE.md](judge-worker-go/CLAUDE.md): Go judge worker (**git submodule**, separate repo)
 
+The design lives in [docs/](docs/): `srs.md` (requirements and resolved decisions), `data-and-storage.md` (schema, buckets), `backend.md` and `frontend.md` (implementation plans). Most of it is not built yet. When code and docs disagree, say so and ask instead of picking one.
+
 ## What this is
 
-Flabsheet is a programming-course platform for students, staff and admins: problems, submissions, progress and a leaderboard. The current code covers auth (login, sessions, change password, role-gated navigation) and an audit/operation log. The other nav pages (`/problems`, `/students`, …) do not exist yet.
+Flabsheet is a programming-course platform for students, staff and admins: problems, submissions, progress and a leaderboard. The current code covers auth (login, sessions, change password, role-gated navigation) and an audit/operation log. The other nav pages (`/problems`, `/manage/students`, …) do not exist yet.
 
 ```
 browser ──► frontend (Next.js :3000) ──/api/* route handlers──► backend (FastAPI :8000) ──► PostgreSQL
@@ -31,6 +33,7 @@ infra/compose.yaml  postgres 16.4, redis 7.4.1, rustfs 1.0.2, storage-init (crea
 compose.dev.yaml    infra + backend/frontend with hot reload (source bind-mounted)
 compose.prod.yaml   infra + production images (.env files baked in at build time)
 env.example         template for the root .env (infra passwords, ports, subnet)
+docs/               SRS and implementation plans
 judge-worker-go/    submodule: git@github.com:User-NotExist/judge-worker-go.git
 ```
 
@@ -56,7 +59,9 @@ docker compose -f infra/compose.yaml --env-file .env up -d
 - **Password rule**: `MIN_PASSWORD_LENGTH = 8` lives in `backend/cli.py`, `backend/routers/auth.py` and `frontend/src/lib/api.ts`.
 - **Login id rule**: `^[A-Za-z0-9._-]{1,64}$` appears in `backend/db/models/user.py` (DB check), `backend/routers/auth.py`, `backend/cli.py`, plus `maxLength={64}` in the login form.
 - **Roles**: `student | staff | admin`, defined by `UserRole` (backend) and the `UserRole` type (frontend `lib/api.ts`).
-- **API shapes**: `AuthResponse`/`UserOut` in `backend/routers/auth.py` mirror the `User`/`AuthResponse` types in `frontend/src/lib/api.ts`. JSON fields are snake_case on both sides.
+- **API shapes**: `AuthResponse`/`UserOut` in `backend/routers/auth.py` mirror the `User`/`AuthResponse` types in `frontend/src/lib/api.ts`. The frontend types are written by hand, and JSON fields are snake_case on both sides.
+- **Error codes**: errors are `{detail}` plus an optional `code` (backend `services/errors.py` `ApiError`, frontend `ApiError.code`). The frontend branches on codes, so never rename one. The list is in `docs/srs.md` section 6.1.
+- **Judge contract**: job, package and event formats are defined by `judge-worker-go/README.md`. The backend adapts to it; contract changes are additive and made in the judge repo first.
 - **New backend endpoint used by the browser**: also add a route handler under `frontend/src/app/api/...` that calls `forwardToBackend`.
 - **Client IP**: the frontend forwards `X-Forwarded-For`, and the backend trusts it only from `STACK_SUBNET` (`FORWARDED_ALLOW_IPS` in the compose files).
 

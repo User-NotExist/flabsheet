@@ -1,6 +1,12 @@
 """Problems, their immutable versions, per-language limits, test cases and images.
 
-A problem points at its live version through ``current_version_id``. The
+A version is frozen once its build is ``ok``; the one exception is
+``TestCase.hint_md``, which staff may edit in place because the judge never
+sees it. Anything else creates a new version.
+
+A problem points at its live version through ``current_version_id``, which
+moves only when a new version's build succeeds, so students keep the previous
+good version while a rebuild is pending or failed. The
 composite FK ``(id, current_version_id) -> problem_versions (problem_id, id)``
 guarantees that the current version belongs to the same problem. Because
 problems and problem_versions reference each other, that FK is created with
@@ -41,18 +47,20 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db.postgres import Base
 
 
-# CREATE TYPE problem_status AS ENUM ('draft', 'enabled', 'disabled');
+# CREATE TYPE problem_status AS ENUM ('draft', 'enabled', 'disabled', 'archived');
 class ProblemStatus(str, enum.Enum):
     draft = "draft"
     enabled = "enabled"
     disabled = "disabled"
+    archived = "archived"  # disabled for good: used instead of delete once students have submitted
 
 
-# CREATE TYPE build_status AS ENUM ('pending', 'building', 'ready', 'failed');
+# CREATE TYPE build_status AS ENUM ('pending', 'ok', 'failed');
+# There is no "building" state: the judge reports a build only once, with
+# build_done, so the backend cannot tell when a build starts.
 class BuildStatus(str, enum.Enum):
     pending = "pending"
-    building = "building"
-    ready = "ready"
+    ok = "ok"
     failed = "failed"
 
 
@@ -90,7 +98,6 @@ class Problem(Base):
         CheckConstraint(
             r"slug ~ '^[a-z0-9-]{1,64}$'", name="problems_slug_check"
         ),
-        CheckConstraint("max_points > 0", name="problems_max_points_check"),
         # current_version_id must belong to the same problem
         ForeignKeyConstraint(
             ["id", "current_version_id"],
@@ -107,9 +114,6 @@ class Problem(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     statement_md: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=""
-    )
-    max_points: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="100"
     )
     status: Mapped[ProblemStatus] = mapped_column(
         problem_status_enum, nullable=False, server_default=ProblemStatus.draft.value
@@ -154,6 +158,9 @@ class ProblemVersion(Base):
     __tablename__ = "problem_versions"
     __table_args__ = (
         CheckConstraint(
+            "max_points > 0", name="problem_versions_max_points_check"
+        ),
+        CheckConstraint(
             "time_limit_ms BETWEEN 1 AND 60000",
             name="problem_versions_time_limit_ms_check",
         ),
@@ -172,6 +179,11 @@ class ProblemVersion(Base):
         BigInteger, ForeignKey("problems.id", ondelete="CASCADE"), nullable=False
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Versioned, not on problems: the package stores it as the subtask's points,
+    # so changing it needs a rebuild like any other judge-relevant setting.
+    max_points: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="100"
+    )
     time_limit_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     memory_limit_mb: Mapped[int] = mapped_column(Integer, nullable=False)
     checker_strict: Mapped[bool] = mapped_column(

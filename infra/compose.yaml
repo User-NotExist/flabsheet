@@ -3,10 +3,11 @@
 #   Redis      : judge job streams, pub/sub, rate limits (AOF on, NFR-REL-01)
 #   RustFS     : S3-compatible storage for images, sources and problem packages
 #
-# Usage:
-#   cp .env.example .env        # then set real passwords and keys
-#   docker compose up -d
-#   docker compose ps           # postgres/redis healthy, storage-init exited 0
+# Usage, from the repository root (normally through compose.dev.yaml or
+# compose.prod.yaml, which include this file):
+#   cp env.example .env         # then set real passwords and keys
+#   docker compose -f infra/compose.yaml --env-file .env up -d
+#   docker compose -f infra/compose.yaml --env-file .env ps   # postgres/redis healthy, storage-init exited 0
 #
 # Ports bind to 127.0.0.1 by default. Judge hosts must reach Redis (6379) and
 # RustFS (9000): set BIND_ADDR in .env to the app server's private IP and allow

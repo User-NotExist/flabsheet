@@ -11,8 +11,9 @@ import type { UserRole } from "@/lib/api";
  * The backend still authorizes every API call; this only shapes the UI.
  *
  * `hrefByRole` sends some roles to a different page when they click the link
- * (e.g. students to their own progress). Keep those targets under `href` so
- * the link stays highlighted there and `roles` still governs access.
+ * (e.g. staff to `/manage/problems` instead of the student `/problems`). Such
+ * a target is a section of its own: only the roles mapped to it may open the
+ * pages below it, and the link shows as active there too.
  */
 export type NavItem = {
   label: string;
@@ -26,7 +27,7 @@ export type NavLink = {
   label: string;
   /** Where the link goes for this role. */
   href: string;
-  /** Section prefix used for the active state. */
+  /** The item's own section. The link is active under it and under `href`. */
   section: string;
 };
 
@@ -65,11 +66,26 @@ export function navItemsFor(role: UserRole): NavLink[] {
   }));
 }
 
+/** Whether `link` should show as the current page for `pathname`. */
+export function isActive(pathname: string, link: NavLink): boolean {
+  return isUnder(pathname, link.section) || isUnder(pathname, link.href);
+}
+
 /**
  * Whether `role` may open `pathname`. Paths not covered by a nav item are
  * allowed; a restricted item also restricts everything below it.
  */
 export function canAccessPath(pathname: string, role: UserRole): boolean {
-  const item = NAV_ITEMS.find((i) => isUnder(pathname, i.href));
-  return !item?.roles || item.roles.includes(role);
+  for (const item of NAV_ITEMS) {
+    const allowed = !item.roles || item.roles.includes(role);
+    // Role-specific targets first: /manage/problems is not below /problems,
+    // so without this check any signed-in user could open it.
+    for (const target of new Set(Object.values(item.hrefByRole ?? {}))) {
+      if (isUnder(pathname, target)) {
+        return allowed && item.hrefByRole?.[role] === target;
+      }
+    }
+    if (isUnder(pathname, item.href)) return allowed;
+  }
+  return true;
 }

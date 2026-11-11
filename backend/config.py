@@ -23,8 +23,9 @@ class Settings(BaseSettings):
     session_ttl_days: int = 7
     # None = derive from frontend_url (Secure only when the site is served over https)
     session_cookie_secure: bool | None = None
-    # Failed logins allowed per (login_id, client IP) inside the window before 429
-    login_rate_limit_attempts: int = 5
+    # Failed logins allowed per login id, and separately per client IP, inside
+    # the window before 429
+    login_rate_limit_attempts: int = 10
     login_rate_limit_window_seconds: int = 900
 
     @property

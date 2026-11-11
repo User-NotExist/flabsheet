@@ -1,4 +1,4 @@
-"""Submissions, per-test results, judge event dedup, the outbox and best scores.
+"""Submissions, per-test results, judge event dedup, the outbox and current scores.
 
 Flow: a submission row and its ``judge_outbox`` row are written in one
 transaction; a relay pushes the outbox payload to the Redis stream and sets
@@ -30,10 +30,12 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Identity,
+    Index,
     Integer,
     Numeric,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -41,11 +43,15 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db.postgres import Base
 
 
-# CREATE TYPE submission_status AS ENUM ('queued', 'running', 'done');
+# CREATE TYPE submission_status AS ENUM
+#   ('queued', 'compiling', 'running', 'done', 'delayed', 'review');
 class SubmissionStatus(str, enum.Enum):
     queued = "queued"
-    running = "running"
+    compiling = "compiling"  # judge sent `started`
+    running = "running"  # first `test_result` arrived
     done = "done"
+    delayed = "delayed"  # no `done` event within 15 min; staff can requeue
+    review = "review"  # verdict JE: held for staff, not scored
 
 
 submission_status_enum = Enum(
@@ -208,3 +214,37 @@ class ProblemScore(Base):
     achieved_at: Mapped[datetime] = mapped_column(  # when this score became current
         DateTime(timezone=True), nullable=False
     )
+
+
+# Each index serves a named screen or job (docs/data-and-storage.md). Add
+# others only after a slow query shows up.
+_UNFINISHED = text("status IN ('queued', 'compiling', 'running')")
+
+# Student history per problem, latest-submission lookup
+Index(
+    "submissions_user_problem_idx",
+    Submission.user_id,
+    Submission.problem_id,
+    Submission.created_at.desc(),
+)
+# Staff submission browser, rejudge
+Index("submissions_problem_idx", Submission.problem_id, Submission.created_at.desc())
+# The "max 3 queued" check on every submit
+Index("submissions_active_idx", Submission.user_id, postgresql_where=_UNFINISHED)
+# Finding submissions with no `done` after 15 min
+Index("submissions_stale_idx", Submission.created_at, postgresql_where=_UNFINISHED)
+# JE review queue
+Index(
+    "submissions_review_idx",
+    Submission.created_at,
+    postgresql_where=text("status = 'review'"),
+)
+# Progress matrix and exports (the primary key already covers per-user reads)
+Index("problem_scores_problem_idx", ProblemScore.problem_id)
+Index("judge_events_submission_idx", JudgeEvent.submission_id)
+# Outbox relay: unsent jobs, oldest first
+Index(
+    "judge_outbox_unsent_idx",
+    JudgeOutbox.created_at,
+    postgresql_where=text("sent_at IS NULL"),
+)
