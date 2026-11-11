@@ -1,7 +1,7 @@
 // Flabsheet: build and deploy the production stack (compose.prod.yaml) with
 // Docker Compose on the Jenkins agent that runs it.
 //
-// Agent: a node labelled "flabsheet-deploy" on the app server, with Docker
+// Agent: any node (agent any) on the app server, with Docker
 // Engine and the Compose v2 plugin, whose Jenkins user is in the docker group.
 // The stack runs on that node's Docker daemon, so data volumes (pg-data,
 // redis-data, rustfs-data) persist between builds under the "flabsheet"
@@ -26,7 +26,7 @@
 //   docker compose -p flabsheet exec backend python cli.py seed-admin   # first admin, once
 
 pipeline {
-    agent { label any }
+    agent any
 
     options {
         // Two deploys at once would race on the same containers
