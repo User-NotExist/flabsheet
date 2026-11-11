@@ -56,6 +56,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    networks: [default, judge]
 
   rustfs:
     image: rustfs/rustfs:1.0.2   # same version as the judge worker's dev stack
@@ -73,6 +74,7 @@ services:
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${RUSTFS_PORT:-9000}:9000"
       - "127.0.0.1:${RUSTFS_CONSOLE_PORT:-9001}:9001"
+    networks: [default, judge]
 
   # One-shot job: creates the two buckets from SRS section 5.2 if they are missing.
   # Safe to re-run: `docker compose run --rm storage-init`
@@ -113,3 +115,8 @@ volumes:
   pg-data:
   redis-data:
   rustfs-data:
+
+networks:
+  judge:
+    external: true
+    name: judge-net

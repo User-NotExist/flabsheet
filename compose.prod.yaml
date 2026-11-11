@@ -47,6 +47,7 @@ services:
         condition: service_healthy
       rustfs:
         condition: service_started
+    networks: [default, judge]
 
   # Background jobs (package builds, judge outbox). Same image as the backend.
   worker:
@@ -92,3 +93,6 @@ networks:
     ipam:
       config:
         - subnet: ${STACK_SUBNET:-172.30.20.0/24}
+  judge:
+    external: true
+    name: judge-net
