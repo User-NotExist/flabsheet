@@ -2,7 +2,7 @@
 
 The frontend is one Next.js app on Bun that serves all three roles; it holds no business rules and calls the FastAPI backend for everything, so access control and hidden-data rules live server-side.
 
-Only login, change password, the top navigation and the auth gate exist today. The rest of this page is the plan. [frontend/AGENTS.md](../frontend/AGENTS.md) holds the day-to-day coding rules.
+Login, change password, the top navigation, the auth gate and the staff problem pages (`/manage/problems`, `/new`, `/[id]`) exist today. The rest of this page is the plan. The problem pages fetch with plain effects and `lib/api.ts`, without TanStack Query, react-hook-form or TanStack Table, and reorder test cases with buttons instead of drag and drop; `/new` asks only for title and slug, because images and test inputs need the problem's id. [frontend/AGENTS.md](../frontend/AGENTS.md) holds the day-to-day coding rules.
 
 ## Stack and setup
 

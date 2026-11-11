@@ -1,0 +1,34 @@
+# judge-worker settings for compose.dev.yaml, mounted at
+# /etc/judge-worker/config.yaml. The credential files are written by the
+# judge-secrets service. Production hosts use judge-worker-go/deploy/opt-judge.
+worker_id: dev-01
+slots: 2   # must equal go-judge's -parallelism in compose.dev.yaml
+
+gojudge:
+  url: http://127.0.0.1:5050   # judge-worker shares go-judge's network namespace
+  auth_token_file: /run/secrets/judge/gojudge.token
+
+redis:
+  addr: redis:6379
+  password_file: /run/secrets/judge/redis.password
+
+api:
+  events_url: http://backend:8000/internal/judge-events
+  token_file: /run/secrets/judge/api.token
+
+storage:
+  endpoint: http://rustfs:9000
+  bucket: problems
+  region: us-east-1
+  access_key_file: /run/secrets/judge/s3.key
+  secret_key_file: /run/secrets/judge/s3.secret
+
+cache:
+  dir: /var/lib/judge-worker/cache
+  max_bytes: 2GiB
+
+health:
+  timing_check: false   # a development machine is too noisy for the timing baseline
+
+languages_file: /etc/judge-worker/languages.yaml
+log_level: debug

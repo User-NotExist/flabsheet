@@ -2,7 +2,7 @@
 
 The backend is one FastAPI codebase run as two processes, the HTTP API and a background worker; it is the only component that reads or writes PostgreSQL, and the only one the judge talks to.
 
-Only auth, sessions, the operation log and the database models exist today. Everything else on this page is the plan for the remaining modules. [backend/AGENTS.md](../backend/AGENTS.md) holds the day-to-day coding rules.
+Auth, sessions, the operation log, the database models, problem management (`problems`, `packages`) and the build half of the judge integration exist today. Everything else on this page is the plan for the remaining modules. [backend/AGENTS.md](../backend/AGENTS.md) holds the day-to-day coding rules.
 
 ## Stack and project layout
 
@@ -14,9 +14,9 @@ The stack is sync: handlers are plain `def` functions that FastAPI runs in its t
 | Database | SQLAlchemy 2 (sync) + psycopg 3. `main.py` creates missing tables and indexes at import with `create_all`; Alembic migrations are deferred until after the MVP (NFR-OPS-04) |
 | Validation | Pydantic v2; separate response models per role (student vs staff) |
 | Redis | `redis-py` (sync) for streams, rate limits and caches; `redis.asyncio` only in the SSE route for pub/sub |
-| Object storage | S3 API, path-style, for upload and presigned GET/PUT. `aioboto3` is the dependency today; to be confirmed when the first storage code is written, because the sync handlers need a sync client |
+| Object storage | S3 API, path-style, for upload and presigned GET/PUT, through sync `boto3` (`services/storage.py`) |
 | Passwords | `argon2-cffi` (argon2id) |
-| Background jobs | arq (Redis-backed) in a separate `worker` process, same codebase; to be confirmed with the first job, because arq jobs are coroutines and the services are sync |
+| Background jobs | arq (Redis-backed) in a separate `worker` process, same codebase (`worker.py`). Jobs are async wrappers that run the sync services in a thread. The API enqueues best effort; a 5 s cron resumes anything that was lost |
 | Live updates | Server-Sent Events via `sse-starlette` |
 | Metrics | `prometheus-fastapi-instrumentator` at `/metrics`, plus `/healthz` (exists) |
 | Tests | Deferred until after the MVP. Planned: pytest + httpx; Testcontainers (PostgreSQL, Redis, RustFS) |
@@ -32,16 +32,24 @@ db/redis.py             shared redis client
 db/models/              user, operation_log, student_import, problem, submission, instance_settings
 routers/<area>.py       one APIRouter per area, with its request/response models
   auth.py               login, logout, logout-all, me, change-password
-  planned: staff.py, students.py, problems.py, submissions.py, monitoring.py,
-           leaderboard.py, settings.py, images.py, internal.py (judge endpoints)
+  problems.py           /admin/problems, /admin/languages
+  images.py             GET /images/{id}
+  internal.py           judge endpoints: judge-events (build_done only so far), job refresh
+  planned: staff.py, students.py, submissions.py, monitoring.py,
+           leaderboard.py, settings.py
 services/<area>.py      logic shared by routers and background jobs
   auth.py               current_session, require_role, CSRF check
   session.py            session create / lookup / revoke, Redis cache
   rate_limit.py         failed-login counters
   operation_log.py      log_operation, log_operation_now
   errors.py             ApiError (detail + code)
-  planned: packages.py, judge.py, scoring.py, storage.py
-worker.py               planned: background job entry point
+  storage.py            S3 client, presigned URLs, StorageError
+  packages.py           problem.yaml, package zips, build steps
+  judge.py              job ids, Redis streams, outbox relay
+  jobs.py               enqueue() for the arq worker
+  languages.py          copy of the judge's language registry
+  planned: scoring.py
+worker.py               arq worker: start_build, assemble_package, flush_outbox, resume_builds
 ```
 
 ## Modules
@@ -98,8 +106,10 @@ The worker process runs these; each is safe to run twice.
 
 | Job | Trigger | Does |
 | --- | --- | --- |
-| `flush_outbox` | Every 5 s | Re-sends unsent judge and build jobs to Redis |
-| `assemble_package` | `build_done ok` | Builds and uploads the final package zip, marks the version `ok` and makes it current |
+| `flush_outbox` | Every 5 s | Re-sends unsent judge and build jobs to Redis (build jobs get freshly signed URLs) |
+| `start_build` | Saving a new version | Builds and uploads the staging zip, writes the outbox row and sends the build job. Fails the version as `superseded` if a newer one exists |
+| `assemble_package` | `build_done ok` | Verifies each answer's SHA-256, builds and uploads the final package zip, marks the version `ok` and makes it current |
+| `resume_builds` | Every 5 s | Runs `start_build` and `assemble_package` for versions whose enqueued job was lost or failed |
 | `detect_delayed` | Every minute | Marks submissions with no `done` after 15 min as `delayed` (FR-JDG-05) |
 | `rejudge_problem` | Staff action | Enqueues every submission of the problem, each student's latest first so scores update soonest, on the `rejudge` lane with a new `job_id` and attempt; warns over 200 (SRS 6.6) |
 | `refresh_leaderboard` | After `done`, debounced 5 s | Rebuilds the cached leaderboard |

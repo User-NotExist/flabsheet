@@ -35,13 +35,16 @@ src/app/layout.tsx           root layout, Geist fonts, metadata template "%s · 
 src/app/(app)/               signed-in pages; layout.tsx renders <TopNav/> inside <Suspense>
 src/app/login, change-password   signed-out/account pages (wrapped in <AuthShell>, no top nav)
 src/app/api/<path>/route.ts  thin forwarders: `return forwardToBackend(request, "/<path>")`
-src/components/ui/           shadcn-generated primitives (button, card, input, label)
-src/components/<feature>/    feature components (auth/, nav/)
+src/components/ui/           shadcn-generated primitives (badge, button, card, dialog, input, label, native-select,
+                             switch, tabs, textarea)
+src/components/<feature>/    feature components (auth/, nav/, problems/)
+src/app/(app)/manage/problems  staff problem list, /new (title + slug), /[id] (editor)
 src/lib/api.ts               browser client: fetch /api/*, ApiError, CSRF token handling, shared types
 src/lib/backend.ts           server-only: BACKEND_URL, forwardToBackend (header allowlist)
 src/lib/session.ts           server-only: checkSession(token) → valid | invalid | unknown
 src/lib/navigation.ts        NAV_ITEMS (+ roles), canAccessPath, navItemsFor, isActive, ROLE_LABELS
 src/lib/redirect.ts          safeNextPath(): open-redirect guard for ?next=
+src/lib/use-api-error.ts     useApiError(): error → message to show, redirecting to /login on 401
 ```
 
 ## How auth works here
@@ -55,7 +58,7 @@ src/lib/redirect.ts          safeNextPath(): open-redirect guard for ?next=
 ## Adding things
 
 - **Page**: create `src/app/(app)/<route>/page.tsx` with a default export and `export const metadata: Metadata = { title: "…" }`. If only some roles should see it, add or adjust its `NAV_ITEMS` entry; that one entry controls both the nav link and proxy access for everything below the path. An `hrefByRole` target (such as `/manage/problems`) is a section too: only the roles mapped to it may open pages below it.
-- **Backend call**: add the route handler under `src/app/api/...` (one exported function per method), then add a typed wrapper in `lib/api.ts` with snake_case fields matching the backend Pydantic models. For a long-lived response (SSE), pass `{ stream: true }` to `forwardToBackend`, or its 30 s timeout cuts the stream.
+- **Backend call**: add the route handler under `src/app/api/...` (one exported function per method), then add a typed wrapper in `lib/api.ts` with snake_case fields matching the backend Pydantic models. For a path with an id, use `forwardWithId` (it refuses anything but digits, so a segment like `..` cannot reach another backend route). For a long-lived response (SSE), pass `{ stream: true }` to `forwardToBackend`, or its 30 s timeout cuts the stream.
 - **Server-only data**: Server Components can read the session with `cookies()` + `checkSession()` (see `top-nav.tsx`). With `cacheComponents`, anything that reads cookies or headers must render inside a `<Suspense>` boundary with a fallback that matches the layout.
 
 ## Gotchas
@@ -65,7 +68,9 @@ src/lib/redirect.ts          safeNextPath(): open-redirect guard for ?next=
 - **`cn`** comes from the `cn` package (`@/lib/utils` re-exports it), not clsx + tailwind-merge.
 - **Base UI APIs**: these differ from Radix. There is no `asChild`. To style a link as a button, use `className={buttonVariants({ variant, size })}` on `<Link>`.
 - **Error codes**: some backend errors carry a `code`, exposed as `ApiError.code` (for example `rate_limited`). Branch on the code or the status, never on the message text.
-- **Effects that fetch**: guard them with a `cancelled` flag in the cleanup, and handle `ApiError` with status 401 by redirecting with `router.replace("/login…")`.
+- **Effects that fetch**: guard them with a `cancelled` flag in the cleanup, and handle `ApiError` with status 401 by redirecting with `router.replace("/login…")` (`useApiError` does this). Call `setState` only in the promise callbacks: the lint rules reject it in the effect body, and reject reading or writing a ref during render.
+- **Dynamic route params in a Client Component**: read them with `useParams()` and render the component inside `<Suspense>` in the page (see `manage/problems/[id]/page.tsx`).
+- **Markdown**: render it only through `components/problems/markdown-view.tsx` (sanitised, no raw HTML, KaTeX), so previews and student views match.
 
 ## Style
 
