@@ -10,11 +10,13 @@ import db.models.student_import
 import db.models.problem
 import db.models.submission
 import db.models.instance_settings
-from routers import auth
+from routers import auth, images, internal, problems
 from services.errors import ApiError, api_error_handler
+from services.storage import StorageError, storage_error_handler
 
 app = FastAPI()
 app.add_exception_handler(ApiError, api_error_handler)
+app.add_exception_handler(StorageError, storage_error_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,6 +32,9 @@ with engine.begin() as conn:
 Base.metadata.create_all(engine)
 
 app.include_router(auth.router)
+app.include_router(problems.router)
+app.include_router(images.router)
+app.include_router(internal.router)
 
 
 @app.get("/healthz", include_in_schema=False)

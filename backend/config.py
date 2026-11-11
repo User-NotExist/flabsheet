@@ -28,6 +28,23 @@ class Settings(BaseSettings):
     login_rate_limit_attempts: int = 10
     login_rate_limit_window_seconds: int = 900
 
+    # --- object storage (RustFS / S3 API, path-style) ---
+    s3_endpoint_url: str = "http://localhost:9000"
+    # Endpoint written into presigned URLs handed to the judge. It must be the
+    # address the judge host uses to reach RustFS, because the signature covers
+    # the host name. None = same as s3_endpoint_url.
+    s3_public_endpoint_url: str | None = None
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_region: str = "us-east-1"
+    s3_bucket_assets: str = "assets"
+    s3_bucket_problems: str = "problems"
+
+    # --- judge ---
+    # Bearer token the judge worker sends to /internal/*. Empty = every
+    # /internal request is refused.
+    judge_api_token: str = ""
+
     @property
     def cookie_secure(self) -> bool:
         if self.session_cookie_secure is not None:

@@ -14,13 +14,14 @@ The page design lives in [docs/img/](docs/img/): file name shows the page title 
 
 ## What this is
 
-Flabsheet is a programming-course platform for students, staff and admins: problems, submissions, progress and a leaderboard. The current code covers auth (login, sessions, change password, role-gated navigation) and an audit/operation log. The other nav pages (`/problems`, `/manage/students`, …) do not exist yet.
+Flabsheet is a programming-course platform for students, staff and admins: problems, submissions, progress and a leaderboard. The current code covers auth (login, sessions, change password, role-gated navigation), an audit/operation log and problem management for staff (`/manage/problems`: list, editor, package builds through the judge). The other nav pages (`/problems`, `/manage/students`, …) do not exist yet.
 
 ```
 browser ──► frontend (Next.js :3000) ──/api/* route handlers──► backend (FastAPI :8000) ──► PostgreSQL
                 │  src/proxy.ts: page auth gate (GET /auth/me)                      └────► Redis (sessions cache, rate limits)
                                                                                             RustFS (S3: buckets "assets", "problems")
-judge-worker-go ◄── Redis Streams / RustFS (separate hosts in production)
+                                                  worker (arq, same backend code) ──► PostgreSQL, Redis, RustFS
+judge-worker-go ◄── Redis Streams / RustFS (separate hosts in production) ──► backend /internal/* (events)
 ```
 
 - The browser **only** talks to the frontend. The frontend server forwards `/api/*` to the backend (`frontend/src/lib/backend.ts`).
@@ -29,10 +30,10 @@ judge-worker-go ◄── Redis Streams / RustFS (separate hosts in production)
 ## Layout
 
 ```
-backend/            FastAPI service (uv, Python 3.12)
+backend/            FastAPI service + background worker (uv, Python 3.12)
 frontend/           Next.js app (bun)
 infra/compose.yaml  postgres 16.4, redis 7.4.1, rustfs 1.0.2, storage-init (creates buckets)
-compose.dev.yaml    infra + backend/frontend with hot reload (source bind-mounted)
+compose.dev.yaml    infra + backend/worker/frontend with hot reload (source bind-mounted) + go-judge/judge-worker (built from the submodule)
 compose.prod.yaml   infra + production images (.env files baked in at build time)
 env.example         template for the root .env (infra passwords, ports, subnet)
 docs/               SRS and implementation plans
@@ -45,7 +46,7 @@ judge-worker-go/    submodule: git@github.com:User-NotExist/judge-worker-go.git
 # Full dev stack (frontend http://localhost:3000, backend http://localhost:8000/docs)
 docker compose -f compose.dev.yaml up --build
 docker compose -f compose.dev.yaml exec backend python cli.py seed-admin   # first admin
-docker compose -f compose.dev.yaml logs -f backend frontend
+docker compose -f compose.dev.yaml logs -f backend worker frontend
 
 # Only the data services, to run backend/frontend on the host
 docker compose -f infra/compose.yaml --env-file .env up -d
@@ -64,6 +65,9 @@ docker compose -f infra/compose.yaml --env-file .env up -d
 - **API shapes**: `AuthResponse`/`UserOut` in `backend/routers/auth.py` mirror the `User`/`AuthResponse` types in `frontend/src/lib/api.ts`. The frontend types are written by hand, and JSON fields are snake_case on both sides.
 - **Error codes**: errors are `{detail}` plus an optional `code` (backend `services/errors.py` `ApiError`, frontend `ApiError.code`). The frontend branches on codes, so never rename one. The list is in `docs/srs.md` section 6.1.
 - **Judge contract**: job, package and event formats are defined by `judge-worker-go/README.md`. The backend adapts to it; contract changes are additive and made in the judge repo first.
+- **Languages**: `backend/services/languages.py` is a copy of the judge's `languages.yaml` (ids and `source_name`). Add a language in the judge first, then there.
+- **Judge token and storage address**: the judge's api token equals backend `JUDGE_API_TOKEN`, and `S3_PUBLIC_ENDPOINT_URL` must be the RustFS address the judge host uses, because presigned URLs are signed for that host.
+- **Problem limits**: slug rule `^[a-z0-9-]{1,64}$`, 100 test cases, 8 MB per input, 5 MB per image, 1000-character hints and 64 KB sources live in `backend/db/models/` and `backend/routers/problems.py`, and again in `frontend/src/lib/api.ts`.
 - **New backend endpoint used by the browser**: also add a route handler under `frontend/src/app/api/...` that calls `forwardToBackend`.
 - **Client IP**: the frontend forwards `X-Forwarded-For`, and the backend trusts it only from `STACK_SUBNET` (`FORWARDED_ALLOW_IPS` in the compose files).
 

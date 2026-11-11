@@ -14,6 +14,15 @@ include:
   - path: infra/compose.yaml   # postgres, redis, rustfs, storage-init
     env_file: .env
 
+# Settings the backend and its worker share. S3_PUBLIC_ENDPOINT_URL (the
+# address judge hosts use for RustFS) and JUDGE_API_TOKEN stay in backend/.env.
+x-backend-env: &backend-env
+  POSTGRES_URL: postgresql+psycopg://${POSTGRES_USER:-flabsheet}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-flabsheet}
+  REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
+  S3_ENDPOINT_URL: http://rustfs:9000
+  S3_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?set RUSTFS_ACCESS_KEY in .env}
+  S3_SECRET_KEY: ${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY in .env}
+
 services:
   backend:
     build:
@@ -21,11 +30,10 @@ services:
       dockerfile: Dockerfile
     image: flabsheet-backend:${IMAGE_TAG:-latest}
     restart: unless-stopped
-    # Other settings come from backend/.env; these two override it because
+    # Other settings come from backend/.env; these override it because
     # inside the container the services are reached by name, not localhost.
     environment:
-      POSTGRES_URL: postgresql+psycopg://${POSTGRES_USER:-flabsheet}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-flabsheet}
-      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
+      <<: *backend-env
       # Trust X-Forwarded-For from containers on this stack's network (the
       # frontend forwards the browser's IP), so login rate limiting and the
       # operation log see the real client instead of the frontend container.
@@ -37,6 +45,29 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      rustfs:
+        condition: service_started
+
+  # Background jobs (package builds, judge outbox). Same image as the backend.
+  worker:
+    # Same build as the backend, so `up --build` never looks for the tag in a registry
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: flabsheet-backend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    command: ["arq", "worker.WorkerSettings"]
+    environment:
+      <<: *backend-env
+    # The image's HEALTHCHECK probes the API port, which the worker never opens
+    healthcheck:
+      disable: true
+    depends_on:
+      # The backend creates the schema at startup
+      backend:
+        condition: service_healthy
+      rustfs:
+        condition: service_started
 
   frontend:
     build:

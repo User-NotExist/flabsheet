@@ -41,6 +41,30 @@ const DROPPED_RESPONSE_HEADERS = [
 ];
 
 /**
+ * A numeric path parameter, or null when it is anything else. Check ids with
+ * this before putting them in a backend path: a segment such as ".." would
+ * otherwise let the browser reach a different backend route.
+ */
+export function numericId(value: string): string | null {
+  return /^\d{1,18}$/.test(value) ? value : null;
+}
+
+const NOT_FOUND = () => Response.json({ detail: "Not found" }, { status: 404 });
+
+/**
+ * Forward to a backend path built from a numeric id, e.g.
+ * `forwardWithId(request, id, (id) => `/admin/problems/${id}`)`.
+ */
+export function forwardWithId(
+  request: Request,
+  id: string,
+  path: (id: string) => string,
+): Promise<Response> | Response {
+  const safe = numericId(id);
+  return safe === null ? NOT_FOUND() : forwardToBackend(request, path(safe));
+}
+
+/**
  * Send `request` on to the backend at `path` (e.g. "/auth/login") and return
  * its response, including Set-Cookie, so the session cookie is first-party.
  *
