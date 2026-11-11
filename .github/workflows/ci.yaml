@@ -171,8 +171,10 @@ jobs:
           cp backend/.env.example backend/.env
           cp frontend/.env.example frontend/.env
 
+      # Named explicitly so a judge service never sneaks back into this build:
+      # those live in compose.dev.judge.yaml and need the submodule.
       - name: Build development images
-        run: docker compose -f compose.dev.yaml build
+        run: docker compose -f compose.dev.yaml build backend worker frontend
 
       # storage-init runs as its own step below so that its exit code fails
       # the job directly.

@@ -33,7 +33,8 @@ judge-worker-go ◄── Redis Streams / RustFS (separate hosts in production) 
 backend/            FastAPI service + background worker (uv, Python 3.12)
 frontend/           Next.js app (bun)
 infra/compose.yaml  postgres 16.4, redis 7.4.1, rustfs 1.0.2, storage-init (creates buckets)
-compose.dev.yaml    infra + backend/worker/frontend with hot reload (source bind-mounted) + go-judge/judge-worker (built from the submodule)
+compose.dev.yaml    infra + backend/worker/frontend with hot reload (source bind-mounted)
+compose.dev.judge.yaml  overlay on compose.dev.yaml: go-judge/judge-worker built from the submodule
 compose.prod.yaml   infra + production images (.env files baked in at build time)
 env.example         template for the root .env (infra passwords, ports, subnet)
 docs/               SRS and implementation plans
@@ -47,6 +48,9 @@ judge-worker-go/    submodule: git@github.com:User-NotExist/judge-worker-go.git
 docker compose -f compose.dev.yaml up --build
 docker compose -f compose.dev.yaml exec backend python cli.py seed-admin   # first admin
 docker compose -f compose.dev.yaml logs -f backend worker frontend
+
+# Same stack plus the judge (needs: git submodule update --init judge-worker-go)
+docker compose -f compose.dev.yaml -f compose.dev.judge.yaml up --build
 
 # Only the data services, to run backend/frontend on the host
 docker compose -f infra/compose.yaml --env-file .env up -d
