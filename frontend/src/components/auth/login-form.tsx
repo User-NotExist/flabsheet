@@ -1,9 +1,8 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useLayoutEffect, useState, type FormEvent } from "react";
 
-import { AUTH_BUTTON_CLASS, AUTH_INPUT_CLASS } from "@/components/auth/auth-shell";
+import { AUTH_BUTTON_CLASS, AUTH_INPUT_CLASS, resetOnDetach } from "@/components/auth/auth-shell";
 import { FormError } from "@/components/auth/form-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +24,6 @@ function loginErrorMessage(error: unknown): string {
 }
 
 export function LoginForm() {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -49,7 +47,7 @@ export function LoginForm() {
         String(form.get("password") ?? ""),
       );
       const next = new URLSearchParams(window.location.search).get("next");
-      router.replace(
+      window.location.replace(
         user.must_change_password ? "/change-password" : safeNextPath(next),
       );
     } catch (err) {
@@ -60,7 +58,8 @@ export function LoginForm() {
 
   return (
     <form
-      ref={(form) => () => form?.reset()}
+      method="post"
+      ref={resetOnDetach}
       onSubmit={handleSubmit}
       className="flex flex-col gap-5"
     >

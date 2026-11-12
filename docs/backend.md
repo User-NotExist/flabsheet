@@ -2,7 +2,7 @@
 
 The backend is one FastAPI codebase run as two processes, the HTTP API and a background worker; it is the only component that reads or writes PostgreSQL, and the only one the judge talks to.
 
-Auth, sessions, the operation log, the database models, problem management (`problems`, `packages`) and the build half of the judge integration exist today. Everything else on this page is the plan for the remaining modules. [backend/AGENTS.md](../backend/AGENTS.md) holds the day-to-day coding rules.
+Auth, sessions, the operation log, student account management, the database models, problem management (`problems`, `packages`) and the build half of the judge integration exist today. Everything else on this page is the plan for the remaining modules. [backend/AGENTS.md](../backend/AGENTS.md) holds the day-to-day coding rules.
 
 ## Stack and project layout
 
@@ -26,16 +26,17 @@ The code is flat under `backend/`, with no package prefix. Files marked *planned
 ```
 main.py                 FastAPI app, CORS, schema setup, routers, ApiError handler
 config.py               settings from env / backend/.env
-cli.py                  seed-admin; planned: sync-languages
+cli.py                  seed-admin, seed-students; planned: sync-languages
 db/postgres.py          engine, SessionLocal, Base, get_database()
 db/redis.py             shared redis client
 db/models/              user, operation_log, student_import, problem, submission, instance_settings
 routers/<area>.py       one APIRouter per area, with its request/response models
   auth.py               login, logout, logout-all, me, change-password
+  students.py           list, create, edit, reset password and import CSV
   problems.py           /admin/problems, /admin/languages
   images.py             GET /images/{id}
   internal.py           judge endpoints: judge-events (build_done only so far), job refresh
-  planned: staff.py, students.py, submissions.py, monitoring.py,
+  planned: staff.py, submissions.py, monitoring.py,
            leaderboard.py, settings.py
 services/<area>.py      logic shared by routers and background jobs
   auth.py               current_session, require_role, CSRF check

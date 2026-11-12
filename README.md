@@ -57,6 +57,25 @@ docker compose -f compose.dev.yaml logs -f backend worker frontend
 
 After changing dependencies (`pyproject.toml`/`uv.lock` or `package.json`/`bun.lock`), restart with `--build`.
 
+### Demo students
+
+With the development stack running, run this command from the repository root:
+
+```sh
+docker compose -f compose.dev.yaml exec backend python cli.py seed-students
+```
+
+Sign in as staff or admin and open **Students** (`/manage/students`). The seed adds logins
+`6512345` through `6512351` from the page mockup. Six are active and `6512350` starts
+deactivated. The command prints a generated password once for each new login. Students
+must change it at first sign-in. Running the command again skips every existing login,
+including accounts whose name, role, status or password has changed.
+
+Each student is a row in `users` with `role=student`. The student ID is the case-insensitive
+`login_id`. PostgreSQL generates the separate numeric primary key `id`. The CLI records
+`created_by=NULL` for these system-created accounts. Accounts created from the page
+record the staff or admin user's primary key in `created_by`.
+
 ### With the judge
 
 The judge (go-judge sandbox and judge-worker) is built from the `judge-worker-go` git submodule. It lives in a separate overlay file, so the app also runs without it. Without the judge, package builds and submissions stay queued.

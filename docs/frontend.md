@@ -26,8 +26,8 @@ Layout under `frontend/src/` (pages marked *planned* do not exist yet):
 proxy.ts                      session check and role routing (Next 16 "proxy", formerly middleware)
 app/login, app/change-password    signed-out / account pages
 app/(app)/                    signed-in pages, one layout with the top nav
-  planned: problems, problems/[slug], submissions/[id], leaderboard,
-           manage/problems, manage/problems/[id], manage/students, manage/progress,
+  manage/problems, manage/problems/[id], manage/problems/new, manage/students
+  planned: problems, problems/[slug], submissions/[id], leaderboard, manage/progress,
            manage/submissions, manage/leaderboard, admin/staff, admin/settings
 app/api/<path>/route.ts       thin forwarders to the backend (forwardToBackend)
 components/ui/                shadcn primitives

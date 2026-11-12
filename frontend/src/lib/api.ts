@@ -129,6 +129,37 @@ export async function logout(): Promise<void> {
   csrfToken = null;
 }
 
+export type Student = Pick<User, "id" | "login_id" | "display_name"> & {
+  is_active: boolean;
+};
+
+export type StudentCredential = { student: Student; password: string };
+
+export async function listStudents(): Promise<Student[]> {
+  return (await request("/students")).json();
+}
+
+export async function createStudent(studentId: string, displayName: string): Promise<StudentCredential> {
+  return (await post("/students", { student_id: studentId, display_name: displayName })).json();
+}
+
+export async function updateStudent(
+  id: number,
+  update: Partial<Pick<Student, "display_name" | "is_active">>,
+): Promise<Student> {
+  return (await send("PATCH", `/students/${id}`, update)).json();
+}
+
+export async function resetStudentPassword(id: number): Promise<StudentCredential> {
+  return (await post(`/students/${id}/reset-password`)).json();
+}
+
+export async function importStudents(file: File): Promise<Blob> {
+  const data = new FormData();
+  data.append("file", file);
+  return (await post("/students/import", data)).blob();
+}
+
 /** Changes the password; the backend signs out the user's other sessions. */
 export async function changePassword(
   currentPassword: string,

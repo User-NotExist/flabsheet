@@ -2,9 +2,10 @@
 
 Usage:
     uv run python cli.py seed-admin --login-id admin --display-name "Administrator"
+    uv run python cli.py seed-students
 
-The password is read from the ADMIN_PASSWORD environment variable if set,
-otherwise it is prompted for interactively.
+The admin password comes from ADMIN_PASSWORD or an interactive prompt.
+Seeded students receive individual, generated first-login passwords.
 """
 
 from __future__ import annotations
@@ -16,13 +17,26 @@ import re
 import sys
 
 from argon2 import PasswordHasher
+from psycopg.errors import UniqueViolation
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 
 from db.postgres import Base, SessionLocal, engine
 from db.models.user import User, UserRole
+from services.operation_log import log_operation
+from services.students import new_student
 
 LOGIN_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 MIN_PASSWORD_LENGTH = 8
+DEMO_STUDENTS = (
+    ("6512345", "Ananya P.", True),
+    ("6512346", "Kanya S.", True),
+    ("6512347", "Mali T.", True),
+    ("6512348", "Narin W.", True),
+    ("6512349", "Pim K.", True),
+    ("6512350", "Thanat R.", False),
+    ("6512351", "Sirin C.", True),
+)
 
 
 def ensure_schema() -> None:
@@ -87,6 +101,36 @@ def seed_admin(args: argparse.Namespace) -> None:
         print(f"Created admin '{admin.login_id}' (id={admin.id}).")
 
 
+def seed_students(_args: argparse.Namespace) -> None:
+    """Insert missing demo students and reveal credentials only after commit."""
+    ensure_schema()
+    created: list[tuple[str, str]] = []
+    with SessionLocal.begin() as db:
+        for login_id, display_name, is_active in DEMO_STUDENTS:
+            existing = select(User.id).where(User.login_id == login_id)
+            if db.scalar(existing) is not None:
+                continue
+            student, password = new_student(login_id, display_name, None, is_active=is_active)
+            try:
+                # Another creator may claim this login ID after the initial check.
+                with db.begin_nested():
+                    db.add(student)
+                    db.flush()
+            except IntegrityError as exc:
+                if not isinstance(exc.orig, UniqueViolation) or db.scalar(existing) is None:
+                    raise
+                continue
+            created.append((login_id, password))
+        if created:
+            log_operation(db, "student.seed", info={"login_ids": [row[0] for row in created]})
+
+    print(f"Created {len(created)} demo students. Skipped {len(DEMO_STUDENTS) - len(created)} existing IDs.")
+    if created:
+        print("Initial passwords (shown once):")
+        for login_id, password in created:
+            print(f"{login_id}: {password}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cli.py", description="flabsheet backend management")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -105,6 +149,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="if the user already exists, overwrite its password and make it an active admin",
     )
     p.set_defaults(func=seed_admin)
+
+    students = sub.add_parser("seed-students", help="create the seven demo students")
+    students.set_defaults(func=seed_students)
 
     return parser
 

@@ -35,3 +35,9 @@ export function AuthShell({
 /** Taller inputs / buttons for the auth forms. */
 export const AUTH_INPUT_CLASS = "h-11 px-3 border-ring";
 export const AUTH_BUTTON_CLASS = "h-11 font-semibold";
+
+// A stable callback ref clears secrets when the form detaches, including when
+// Next hides a cached page. Re-rendering the visible form preserves user input.
+export function resetOnDetach(form: HTMLFormElement | null) {
+  return () => form?.reset();
+}
