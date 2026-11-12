@@ -8,6 +8,7 @@ import {
   AUTH_BUTTON_CLASS,
   AUTH_INPUT_CLASS,
   AuthShell,
+  resetOnDetach,
 } from "@/components/auth/auth-shell";
 import { FormError } from "@/components/auth/form-error";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -79,7 +80,7 @@ export function ChangePasswordForm() {
     setPending(true);
     try {
       await changePassword(current, next);
-      router.replace("/");
+      window.location.replace("/");
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         router.replace("/login?next=/change-password");
@@ -103,7 +104,8 @@ export function ChangePasswordForm() {
       }
     >
       <form
-        ref={(form) => () => form?.reset()}
+        method="post"
+        ref={resetOnDetach}
         onSubmit={handleSubmit}
         className="flex flex-col gap-5"
       >
@@ -161,7 +163,7 @@ export function ChangePasswordForm() {
           >
             {pending ? "Saving…" : "Save password"}
           </Button>
-          {!forced && (
+          {loginId && !forced && (
             <Link
               href="/"
               className={buttonVariants({

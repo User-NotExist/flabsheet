@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session as DbSession
 from config import settings
 from db.models.user import User, UserRole
 from db.postgres import get_database
-from services.auth import CurrentSession
+from services.auth import AccountSession
 from services.errors import ApiError
 from services.operation_log import log_operation, log_operation_now
 from services.rate_limit import clear_login_failures, login_retry_after, record_login_failure
@@ -122,7 +122,8 @@ def login(body: LoginRequest, request: Request, response: Response, db: Db):
         )
 
     # login_id is CITEXT, so this comparison is case-insensitive
-    user = db.scalar(select(User).where(User.login_id == body.login_id))
+    # Serialize session creation with a staff reset or deactivation of this account.
+    user = db.scalar(select(User).where(User.login_id == body.login_id).with_for_update(key_share=True))
     password_ok = _verify_password(user.password_hash if user else _DUMMY_HASH, body.password)
 
     if user is None or not password_ok or not user.is_active:
@@ -155,19 +156,19 @@ def login(body: LoginRequest, request: Request, response: Response, db: Db):
 
 
 @router.get("/me", response_model=AuthResponse)
-def me(session: CurrentSession):
+def me(session: AccountSession):
     return _auth_response(session)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout(session: CurrentSession, response: Response, db: Db):
+def logout(session: AccountSession, response: Response, db: Db):
     log_operation(db, "auth.logout", user_id=session.user_id)
     revoke_session(db, session.session_id)  # commits
     _clear_session_cookie(response)
 
 
 @router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT)
-def logout_all(session: CurrentSession, response: Response, db: Db):
+def logout_all(session: AccountSession, response: Response, db: Db):
     """Revoke every session of the current user, including this one."""
     log_operation(db, "auth.logout_all", user_id=session.user_id)
     revoke_user_sessions(db, session.user_id)  # commits
@@ -175,9 +176,9 @@ def logout_all(session: CurrentSession, response: Response, db: Db):
 
 
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
-def change_password(body: ChangePasswordRequest, session: CurrentSession, db: Db):
+def change_password(body: ChangePasswordRequest, session: AccountSession, db: Db):
     """Change the caller's password and sign out all their other sessions."""
-    user = db.get(User, session.user_id)
+    user = db.get(User, session.user_id, with_for_update=True)
     if user is None or not _verify_password(user.password_hash, body.current_password):
         log_operation_now("auth.change_password_failed", user_id=session.user_id)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")

@@ -56,7 +56,17 @@ def current_session(
     return session
 
 
-CurrentSession = Annotated[SessionData, Depends(current_session)]
+AccountSession = Annotated[SessionData, Depends(current_session)]
+
+
+def require_changed_password(session: AccountSession) -> SessionData:
+    """A temporary password grants access to account routes until it is changed."""
+    if session.must_change_password:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Change your password to continue")
+    return session
+
+
+CurrentSession = Annotated[SessionData, Depends(require_changed_password)]
 
 
 def require_role(*roles: UserRole) -> Callable[..., SessionData]:
