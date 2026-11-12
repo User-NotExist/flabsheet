@@ -37,6 +37,34 @@ services:
   redis:
     image: redis:7.4.1   # same version as the judge worker's dev stack
     restart: unless-stopped
+    # Self-healing start. After a power cut or kill the last AOF file can end
+    # in garbage, and Redis then refuses to start ("Bad file format reading the
+    # append only file") on every restart. So check the AOF first and, if it is
+    # damaged, keep a copy in /data/aof-broken-<time> (3 newest kept) and cut it
+    # back to the last valid command. If that cannot repair it, start empty:
+    # Redis is not the system of record, the outbox re-sends unsent jobs
+    # (docs/data-and-storage.md, "Redis: AOF only, no backup").
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        dir=/data/appendonlydir
+        manifest=$$dir/appendonly.aof.manifest
+        if [ -f "$$manifest" ] && ! redis-check-aof "$$manifest" >/dev/null 2>&1; then
+          backup=/data/aof-broken-$$(date -u +%Y%m%dT%H%M%SZ)
+          echo "redis-start: AOF is damaged, copy kept in $$backup" >&2
+          cp -a "$$dir" "$$backup"
+          if yes | redis-check-aof --fix "$$manifest" >/dev/null 2>&1 \
+              && redis-check-aof "$$manifest" >/dev/null 2>&1; then
+            echo "redis-start: AOF repaired (writes after the damaged point are lost)" >&2
+          else
+            echo "redis-start: AOF cannot be repaired, starting with an empty dataset" >&2
+            rm -rf "$$dir"
+          fi
+          ls -1d /data/aof-broken-* | sort -r | tail -n +4 | xargs -r rm -rf
+        fi
+        exec docker-entrypoint.sh "$$@"
+      - redis-start   # $$0 of the script above; `command` becomes "$$@"
     command:
       - redis-server
       - --appendonly
