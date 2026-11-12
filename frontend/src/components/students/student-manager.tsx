@@ -143,7 +143,7 @@ export function StudentManager() {
         </header>
         {credential && <PasswordNotice credential={credential} onSaved={() => setCredential(null)} />}
 
-        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,26.5%)]">
+        <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,26.5%)]">
           <section className="min-w-0">
             <div className="mb-3 flex items-center gap-3">
               <Label htmlFor="student-search" className="sr-only">Search by name or student ID</Label>
@@ -190,7 +190,7 @@ export function StudentManager() {
             <p className="mt-3 text-xs text-muted-foreground">Deactivated students cannot sign in and are left off the leaderboard. Their submissions are kept.</p>
           </section>
 
-          <aside className="grid gap-4">
+          <aside className="grid w-full max-w-xs grid-cols-1 gap-4">
             <form ref={createForm} method="post" onSubmit={submit} className="grid gap-3 rounded-xl border bg-card p-4">
               <h2 className="font-semibold">Add one student</h2>
               <Label htmlFor="create-student-id">Student ID</Label>
