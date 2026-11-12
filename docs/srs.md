@@ -286,7 +286,7 @@ The paths below are backend paths; they are not versioned. The browser calls the
 | Monitoring | `GET /admin/progress` (matrix), `GET /admin/submissions` (filters), `GET /admin/export/scores.csv`, `GET /admin/export/submissions.csv` | Staff, admin |
 | Leaderboard | `GET /leaderboard` | All |
 | Meta | `GET /languages` (from a backend copy of the judge registry) | All |
-| Instance settings | `GET /settings` (submissions open, banner message, leaderboard mode), `PUT /admin/settings/submissions` (killswitch), `PUT /admin/settings/leaderboard` (live / hidden / frozen) | Read: all; killswitch: admin; leaderboard: staff, admin |
+| Instance settings | `GET /settings` (submissions open, banner message, leaderboard mode), `GET /settings/time` (server clock and UTC offset, for the top bar), `PUT /admin/settings/submissions` (killswitch), `PUT /admin/settings/leaderboard` (live / hidden / frozen) | Read: all; killswitch: admin; leaderboard: staff, admin |
 
 The API MUST shape responses per role: the student serializer for a submission omits hidden test case output, expected output and every checker message on a hidden case (including PE messages), and shows `hint` only on failed cases.
 

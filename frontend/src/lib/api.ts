@@ -382,6 +382,24 @@ export async function getInstanceSettings(): Promise<InstanceSettings> {
   return (await request("/settings")).json();
 }
 
+export type ServerTime = {
+  /** The server's clock as Unix milliseconds. */
+  epochMs: number;
+  /** The server's time zone, as minutes east of UTC. */
+  utcOffsetMinutes: number;
+};
+
+/** The server's clock and time zone, for the top bar. */
+export async function getServerTime(): Promise<ServerTime> {
+  const data: { now: string; utc_offset_minutes: number } = await (
+    await request("/settings/time")
+  ).json();
+  return {
+    epochMs: Date.parse(data.now),
+    utcOffsetMinutes: data.utc_offset_minutes,
+  };
+}
+
 // --- Solving problems (every role) -----------------------------------------
 // Types mirror the Pydantic models in backend/routers/solve.py.
 

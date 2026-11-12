@@ -80,6 +80,7 @@ Build these once and reuse them; the student view and the staff preview must ren
 | `WhitespaceText`, `WhitespaceToggle` | `ResultReport`, sample cases | Renders text with · → ↵ markers; on by default for Strict problems, toggle to hide |
 | `CsvImportDialog` | Students page | Upload, client-side preview, server validation report by row, then one-time download of the password CSV |
 | `OneTimeSecret` | Password reset, staff create, CSV import | Shows a generated password once with copy button and "I have saved it" confirm |
+| `ServerClock` | Top bar | The server's date and time in the server's time zone: reads `GET /settings/time`, counts on locally and re-syncs every 5 min |
 | `KillswitchBanner`, `InstanceSettingsProvider` | All signed-in layouts | The provider reads `GET /settings` every 30 s and `useInstanceSettings()` hands it to pages; the banner shows the admin message while submissions are closed |
 
 ## Auth, data and live updates
