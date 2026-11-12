@@ -114,7 +114,7 @@ export function StudentImport({ onImported }: { onImported: () => void }) {
           </Button>
         </>
       )}
-      {error && <div className="max-h-52 overflow-auto rounded-md bg-destructive/10 p-3 whitespace-pre-line"><FormError message={error} /></div>}
+      {error && <div className="max-h-52 overflow-auto rounded-md bg-destructive/10 p-3 wrap-anywhere whitespace-pre-line"><FormError message={error} /></div>}
       {download && (
         <>
           <p role="status">Students imported. Download their passwords before leaving this page.</p>
