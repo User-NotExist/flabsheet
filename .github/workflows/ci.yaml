@@ -176,6 +176,11 @@ jobs:
       - name: Build development images
         run: docker compose -f compose.dev.yaml build backend worker frontend
 
+      # Declared external in compose.prod.yaml and infra/compose.yaml (judge
+      # hosts join it), so compose refuses to start until it exists.
+      - name: Create judge network
+        run: docker network create judge-net
+
       # storage-init runs as its own step below so that its exit code fails
       # the job directly.
       - name: Start production stack
