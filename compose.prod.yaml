@@ -22,6 +22,9 @@ x-backend-env: &backend-env
   S3_ENDPOINT_URL: http://rustfs:9000
   S3_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?set RUSTFS_ACCESS_KEY in .env}
   S3_SECRET_KEY: ${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY in .env}
+  # The server's time zone: the top bar's clock shows this zone's wall time.
+  # Timestamps are stored and sent with their offset, so nothing else moves.
+  TZ: Asia/Bangkok
 
 services:
   backend:
