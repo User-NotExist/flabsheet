@@ -5,8 +5,9 @@
 Jobs are thin async wrappers around the sync functions in ``services/``; they
 run in a thread, because the services use sync SQLAlchemy, redis-py and boto3.
 The API enqueues ``start_build`` and ``assemble_package`` (``services/jobs.py``)
-so they start at once; the two crons re-send and resume whatever was lost, so
-every job here is safe to run twice.
+so they start at once; the ``flush_outbox`` and ``resume_builds`` crons re-send
+and resume whatever was lost, and ``detect_delayed`` flags submissions the
+judge has not finished in 15 minutes. Every job here is safe to run twice.
 
 The schema is created by ``main.py``: start the API once before the worker on
 an empty database.
@@ -28,7 +29,7 @@ import db.models.student_import  # noqa: F401
 import db.models.submission  # noqa: F401
 import db.models.user  # noqa: F401
 from db.postgres import SessionLocal
-from services import judge, packages
+from services import judge, packages, submissions
 from services.jobs import redis_settings
 
 logger = logging.getLogger(__name__)
@@ -72,8 +73,18 @@ async def resume_builds(ctx: dict[str, Any]) -> None:
     await asyncio.to_thread(_resume_builds)
 
 
+def _detect_delayed() -> None:
+    with SessionLocal() as db:
+        submissions.detect_delayed(db)
+
+
+async def detect_delayed(ctx: dict[str, Any]) -> None:
+    """Mark submissions the judge has not finished within 15 minutes as delayed."""
+    await asyncio.to_thread(_detect_delayed)
+
+
 async def _quiet_cron_logs(ctx: dict[str, Any]) -> None:
-    # arq logs the start and end of every job at INFO, which for two crons is
+    # arq logs the start and end of every job at INFO, which for the 5 s crons is
     # four lines every 5 s; the services log what actually happened.
     logging.getLogger("arq.worker").setLevel(logging.WARNING)
     logging.getLogger("services").setLevel(logging.INFO)
@@ -85,6 +96,7 @@ class WorkerSettings:
     cron_jobs = [
         cron(flush_outbox, second=EVERY_5_SECONDS),
         cron(resume_builds, second=EVERY_5_SECONDS),
+        cron(detect_delayed, second=0),
     ]
     redis_settings = redis_settings()
     # Package jobs hold whole test files in memory (up to 8 MiB each)

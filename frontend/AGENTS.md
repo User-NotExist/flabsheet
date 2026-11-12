@@ -37,14 +37,19 @@ src/app/login, change-password   signed-out/account pages (wrapped in <AuthShell
 src/app/api/<path>/route.ts  thin forwarders: `return forwardToBackend(request, "/<path>")`
 src/components/ui/           shadcn-generated primitives (badge, button, card, dialog, input, label, native-select,
                              switch, tabs, textarea)
-src/components/<feature>/    feature components (auth/, nav/, problems/)
+src/components/<feature>/    feature components (auth/, nav/, problems/, students/, solve/, submissions/, settings/)
 src/app/(app)/manage/problems  staff problem list, /new (title + slug), /[id] (editor)
+src/app/(app)/problems       /problems (list with own scores), /[slug] (statement, editor, submit, live result, history;
+                             staff see it as a preview)
+src/app/(app)/submissions/[id]  one result report (student: own; staff: anyone's, with hidden-case details)
 src/lib/api.ts               browser client: fetch /api/*, ApiError, CSRF token handling, shared types
 src/lib/backend.ts           server-only: BACKEND_URL, forwardToBackend (header allowlist)
 src/lib/session.ts           server-only: checkSession(token) → valid | invalid | unknown
 src/lib/navigation.ts        NAV_ITEMS (+ roles), canAccessPath, navItemsFor, isActive, ROLE_LABELS
 src/lib/redirect.ts          safeNextPath(): open-redirect guard for ?next=
 src/lib/use-api-error.ts     useApiError(): error → message to show, redirecting to /login on 401
+src/lib/sse.ts               useSubmissionProgress(): live judging status over SSE, polling if the stream fails
+src/lib/drafts.ts            code drafts in localStorage, keyed by user, problem and language
 ```
 
 ## How auth works here
@@ -58,7 +63,7 @@ src/lib/use-api-error.ts     useApiError(): error → message to show, redirecti
 ## Adding things
 
 - **Page**: create `src/app/(app)/<route>/page.tsx` with a default export and `export const metadata: Metadata = { title: "…" }`. If only some roles should see it, add or adjust its `NAV_ITEMS` entry; that one entry controls both the nav link and proxy access for everything below the path. An `hrefByRole` target (such as `/manage/problems`) is a section too: only the roles mapped to it may open pages below it.
-- **Backend call**: add the route handler under `src/app/api/...` (one exported function per method), then add a typed wrapper in `lib/api.ts` with snake_case fields matching the backend Pydantic models. For a path with an id, use `forwardWithId` (it refuses anything but digits, so a segment like `..` cannot reach another backend route). For a long-lived response (SSE), pass `{ stream: true }` to `forwardToBackend`, or its 30 s timeout cuts the stream.
+- **Backend call**: add the route handler under `src/app/api/...` (one exported function per method), then add a typed wrapper in `lib/api.ts` with snake_case fields matching the backend Pydantic models. For a path with an id, use `forwardWithId` (it refuses anything but digits, so a segment like `..` cannot reach another backend route); for a problem slug, `forwardWithSlug`. For a long-lived response (SSE), pass `{ stream: true }` to `forwardToBackend`, or its 30 s timeout cuts the stream.
 - **Server-only data**: Server Components can read the session with `cookies()` + `checkSession()` (see `top-nav.tsx`). With `cacheComponents`, anything that reads cookies or headers must render inside a `<Suspense>` boundary with a fallback that matches the layout.
 
 ## Gotchas
@@ -71,6 +76,10 @@ src/lib/use-api-error.ts     useApiError(): error → message to show, redirecti
 - **Effects that fetch**: guard them with a `cancelled` flag in the cleanup, and handle `ApiError` with status 401 by redirecting with `router.replace("/login…")` (`useApiError` does this). Call `setState` only in the promise callbacks: the lint rules reject it in the effect body, and reject reading or writing a ref during render.
 - **Dynamic route params in a Client Component**: read them with `useParams()` and render the component inside `<Suspense>` in the page (see `manage/problems/[id]/page.tsx`).
 - **Markdown**: render it only through `components/problems/markdown-view.tsx` (sanitised, no raw HTML, KaTeX), so previews and student views match.
+- **Data fetching**: there is no query library. Fetch in an effect through `lib/api.ts`, keep the result in state, and after a change set that state from the response or fetch again. A hidden page re-runs its effects when it is shown again, which is what keeps scores and history fresh.
+- **Client providers in `(app)/layout.tsx` go beside `<TopNav />`, not around it**: wrapped in a client component, its session lookup fails the dev prerender check ("unstable value `Date.now()`").
+- **Results and verdicts**: draw them with `components/submissions/` (`VerdictBadge`, `ResultReport`, `LiveStatus`, `WhitespaceText`, `format.ts`), so the problem page, the submission page and the staff preview cannot drift apart. `ResultReport` hides a hidden test's data from students even if a response carried it.
+- **Instance settings**: read them with `useInstanceSettings()` (killswitch, leaderboard mode); don't fetch `/api/settings` again in a page.
 
 ## Style
 

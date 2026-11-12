@@ -240,7 +240,7 @@ PostgreSQL holds all authoritative state; RustFS holds blobs referenced by key; 
 | `student_imports` | `id`, `staff_id`, `row_count`, `created_at` | Audit only; passwords never stored |
 | `judge_outbox` | `id`, `job_id` (unique), `stream`, `payload`, `created_at`, `sent_at`, `tries`, `last_error` | Judge and build jobs waiting to be pushed to Redis (section 6.2) |
 | `operation_logs` | `id`, `user_id`, `type` (dotted, e.g. `auth.login`), `info` (JSON text), `created_at` | The audit log: auth events, account, problem and settings changes (NFR-SEC-09) |
-| `instance_settings` | `submissions_open` (bool), `submissions_message`, `leaderboard_mode` (live/hidden/frozen), `leaderboard_frozen_at`, `leaderboard_snapshot`, `updated_by`, `updated_at` | Single row; cached in Redis and read on every submit |
+| `instance_settings` | `submissions_open` (bool), `submissions_message`, `leaderboard_mode` (live/hidden/frozen), `leaderboard_frozen_at`, `leaderboard_snapshot`, `updated_by`, `updated_at` | Single row; read on every submit |
 
 ### 5.2 RustFS buckets and keys
 
@@ -282,7 +282,7 @@ The paths below are backend paths; they are not versioned. The browser calls the
 | Students | `GET/POST /students`, `POST /students/import` (multipart CSV → result CSV), `PATCH /students/{id}`, `POST /students/{id}/reset-password` | Staff, admin |
 | Problems (manage) | `GET/POST /admin/problems`, `GET/PATCH/DELETE /admin/problems/{id}`, `POST /admin/problems/{id}/enable`, `/disable`, `/archive`, `POST /admin/problems/{id}/images`, `POST /admin/problems/{id}/testdata`, `GET/POST /admin/problems/{id}/build`, `POST /admin/problems/{id}/rejudge` (not built yet), `GET /admin/languages`. `PATCH` saves the whole editor: its optional `config` holds limits, languages, checking mode, reference solution and the ordered test cases (each named by the SHA-256 that `/testdata` returned), so one save creates at most one version | Staff, admin |
 | Problems (solve) | `GET /problems`, `GET /problems/{slug}` (statement, limits, languages, sample cases only), `GET /images/{id}` (statement image, streamed) | All |
-| Submissions | `POST /problems/{slug}/submissions`, `GET /submissions?mine=1`, `GET /submissions/{id}`, `GET /submissions/{id}/stream` (SSE) | Student: own only; staff: all |
+| Submissions | `POST /problems/{slug}/submissions`, `GET /submissions?problem={slug}` (the caller's own, newest first), `GET /submissions/{id}` (`?student_view=true` gives staff the student shape), `GET /submissions/{id}/stream` (SSE) | Student: own only; staff: any single submission. The staff list of all submissions is `GET /admin/submissions` (Monitoring) |
 | Monitoring | `GET /admin/progress` (matrix), `GET /admin/submissions` (filters), `GET /admin/export/scores.csv`, `GET /admin/export/submissions.csv` | Staff, admin |
 | Leaderboard | `GET /leaderboard` | All |
 | Meta | `GET /languages` (from a backend copy of the judge registry) | All |

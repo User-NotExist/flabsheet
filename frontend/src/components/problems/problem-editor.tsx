@@ -17,7 +17,7 @@ import {
 import { MarkdownEditor } from "@/components/problems/markdown-editor";
 import { StatusBadge, enableBlockedReason } from "@/components/problems/problem-badges";
 import { TestCaseEditor } from "@/components/problems/test-case-editor";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -587,6 +587,14 @@ export function ProblemEditor() {
                 ? `${blocked}. A problem can be shown to students once a build has succeeded.`
                 : "Students are judged against the last version that built, also while a newer build is running or has failed."}
             </p>
+            {server.current_version !== null && (
+              <Link
+                href={`/problems/${server.slug}`}
+                className={buttonVariants({ variant: "outline" })}
+              >
+                Preview as student
+              </Link>
+            )}
           </section>
 
           {!readOnly && (

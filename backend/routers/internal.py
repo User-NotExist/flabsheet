@@ -4,7 +4,8 @@ Both require the worker's bearer token (``JUDGE_API_TOKEN``). Nothing here
 checks where the request comes from: the reverse proxy must refuse
 ``/internal/*`` from the public internet (NFR-SEC-06).
 
-Only build jobs exist so far, so only ``build_done`` is handled. The judge
+``build_done`` belongs to a problem version (``services/packages.py``); every
+other event belongs to a submission (``services/submissions.py``). The judge
 drops an event on any 4xx other than 401 and 409, and retries on 5xx, so a
 handler bug must surface as a 5xx and never as a 4xx.
 """
@@ -26,6 +27,7 @@ from db.models.submission import JudgeEvent
 from db.postgres import get_database
 from services.jobs import enqueue
 from services.packages import record_build_result, refreshed_build_payload
+from services.submissions import Outcome, apply_event, refreshed_judge_payload
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +61,8 @@ def _handle_build_done(db: DbSession, event: dict[str, Any]) -> None:
     if version is None:
         return  # the problem was deleted while its build ran
 
-    # event_id is the judge's idempotency key: a replayed event inserts nothing
+    # event_id is the judge's idempotency key: a replayed event inserts nothing.
+    # RETURNING tells the two cases apart; the driver's rowcount does not (-1).
     inserted = db.execute(
         insert(JudgeEvent)
         .values(
@@ -70,8 +73,9 @@ def _handle_build_done(db: DbSession, event: dict[str, Any]) -> None:
             type="build_done",
         )
         .on_conflict_do_nothing(index_elements=[JudgeEvent.event_id])
-    ).rowcount
-    if not inserted or version.build_status is not BuildStatus.pending:
+        .returning(JudgeEvent.event_id)
+    ).first()
+    if inserted is None or version.build_status is not BuildStatus.pending:
         db.commit()
         return
 
@@ -91,17 +95,21 @@ def judge_events(
     # Each event commits on its own, in order, so a failure half-way keeps
     # the earlier ones and the replay skips them as duplicates.
     for event in body if isinstance(body, list) else [body]:
-        if event.get("type") == "build_done" and event.get("event_id"):
+        if not event.get("event_id"):
+            logger.warning("ignoring judge event of type %r without an event_id", event.get("type"))
+        elif event.get("type") == "build_done":
             _handle_build_done(db, event)
-        else:
-            logger.warning("ignoring judge event of type %r", event.get("type"))
+        elif apply_event(db, event) is Outcome.superseded:
+            # The worker stops this job and leaves the message to its new owner.
+            # The events before this one in the array are already committed.
+            raise HTTPException(status.HTTP_409_CONFLICT, "Attempt superseded")
     return {"ok": True}
 
 
 @router.post("/judge-jobs/{job_id}/refresh")
 def refresh_job(job_id: str, db: Db):
     """The same job with fresh presigned URLs, for a job the worker reclaimed late."""
-    payload = refreshed_build_payload(db, job_id)
+    payload = refreshed_build_payload(db, job_id) or refreshed_judge_payload(db, job_id)
     if payload is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
     return payload
