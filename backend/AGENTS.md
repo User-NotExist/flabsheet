@@ -36,7 +36,7 @@ routers/<area>.py       APIRouter(prefix="/<area>", tags=["<area>"]); request/re
 routers/problems.py     /admin/problems (staff, admin): list, editor save, versions, test data and image upload, enable/disable/archive/delete, rebuild
 routers/images.py       GET /images/{id}: statement images streamed from storage
 routers/solve.py        GET /problems, /problems/{slug} (every role): enabled problems, statement, sample cases; staff preview
-routers/submissions.py  POST /problems/{slug}/submissions, GET /submissions, /submissions/{id}, /submissions/{id}/stream (SSE, the one async route)
+routers/submissions.py  POST /problems/{slug}/submissions, GET /submissions, /submissions/queue (instance-wide queued count), /submissions/{id}, /submissions/{id}/stream (SSE, the one async route)
 routers/settings.py     GET /settings: killswitch state, banner message, leaderboard mode
 routers/internal.py     /internal/* for the judge worker (bearer token): judge-events, judge-jobs/{id}/refresh
 worker.py               arq WorkerSettings: start_build, assemble_package jobs + flush_outbox, resume_builds, detect_delayed crons
