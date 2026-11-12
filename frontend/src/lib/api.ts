@@ -548,6 +548,14 @@ export async function getSubmission(
   return (await request(`/submissions/${id}${query}`)).json();
 }
 
+/** Submissions from everyone that the judge has not started yet. */
+export async function getQueueCount(): Promise<number> {
+  const data: { queued: number } = await (
+    await request("/submissions/queue")
+  ).json();
+  return data.queued;
+}
+
 /** URL of the live status stream (Server-Sent Events) of a submission. */
 export function submissionStreamUrl(id: number): string {
   return `${API_URL}/submissions/${id}/stream`;

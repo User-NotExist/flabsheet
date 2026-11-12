@@ -2,6 +2,7 @@
 
     POST /problems/{slug}/submissions   submit {language, source}
     GET  /submissions?problem={slug}    the caller's own history, newest first
+    GET  /submissions/queue             how many submissions wait for the judge
     GET  /submissions/{id}              one result report
     GET  /submissions/{id}/stream       live progress (Server-Sent Events)
 
@@ -105,6 +106,10 @@ class SubmissionListItem(BaseModel):
     max_points: int
     is_staff: bool
     created_at: datetime
+
+
+class QueueOut(BaseModel):
+    queued: int
 
 
 class ProblemRef(BaseModel):
@@ -425,6 +430,24 @@ def list_submissions(session: CurrentSession, db: Db, problem: Optional[str] = N
         )
         for submission, max_points in db.execute(query)
     ]
+
+
+# Declared before /submissions/{submission_id}, which would otherwise take
+# "queue" for an id and answer 422.
+@router.get("/submissions/queue", response_model=QueueOut)
+def get_queue(session: CurrentSession, db: Db):
+    """How many submissions, from everyone, the judge has not started yet.
+
+    Every role may read it: the number says how long a result may take and
+    nothing about whose submissions they are. The top bar polls it, so it is
+    one count over the partial index on unfinished rows.
+    """
+    queued = db.scalar(
+        select(func.count())
+        .select_from(Submission)
+        .where(Submission.status == SubmissionStatus.queued)
+    )
+    return QueueOut(queued=queued or 0)
 
 
 @router.get("/submissions/{submission_id}", response_model=SubmissionOut)

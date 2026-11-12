@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { LogoutButton } from "@/components/nav/logout-button";
 import { NavLinks } from "@/components/nav/nav-links";
+import { QueueCount } from "@/components/nav/queue-count";
 import { navItemsFor, ROLE_LABELS } from "@/lib/navigation";
 import { checkSession, SESSION_COOKIE } from "@/lib/session";
 
@@ -43,6 +44,7 @@ export async function TopNav() {
     <NavBar>
       <NavLinks items={items} />
       <div className="ml-auto flex shrink-0 items-center gap-6 text-sm">
+        <QueueCount />
         <span className="hidden text-muted-foreground sm:inline">
           {user.display_name} · {ROLE_LABELS[user.role]}
         </span>
