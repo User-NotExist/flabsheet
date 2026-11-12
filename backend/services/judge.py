@@ -74,8 +74,9 @@ def send_outbox(db: Session, row: JudgeOutbox) -> bool:
 
 def flush_outbox(db: Session) -> int:
     """Re-send outbox rows that were committed but never reached Redis."""
-    # Imported here: packages builds job payloads and itself imports this module
+    # Imported here: both build job payloads and themselves import this module
     from services.packages import refreshed_build_payload
+    from services.submissions import refreshed_judge_payload
 
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=OUTBOX_GRACE_SECONDS)
     rows = db.scalars(
@@ -87,14 +88,14 @@ def flush_outbox(db: Session) -> int:
     ).all()
     sent = 0
     for row in rows:
-        if row.stream == BUILD_STREAM:
-            # The stored presigned URLs may have expired while Redis was down
-            payload = refreshed_build_payload(db, row.job_id)
-            if payload is None:  # the problem was deleted meanwhile
-                db.delete(row)
-                db.commit()
-                continue
-            row.payload = payload
+        # The stored presigned URLs may have expired while Redis was down
+        refresh = refreshed_build_payload if row.stream == BUILD_STREAM else refreshed_judge_payload
+        payload = refresh(db, row.job_id)
+        if payload is None:  # the problem was deleted meanwhile
+            db.delete(row)
+            db.commit()
+            continue
+        row.payload = payload
         if send_outbox(db, row):
             sent += 1
     db.commit()

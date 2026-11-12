@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     # Bearer token the judge worker sends to /internal/*. Empty = every
     # /internal request is refused.
     judge_api_token: str = ""
+    # The judge queue is per course; one deployment serves one course, so
+    # every job carries this fixed value (stream judge:practice:{id}).
+    judge_course_id: int = 1
 
     @property
     def cookie_secure(self) -> bool:

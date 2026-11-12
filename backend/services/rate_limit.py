@@ -1,4 +1,7 @@
-"""Failed-login rate limiting backed by Redis counters.
+"""Rate limits backed by Redis: failed logins and submissions.
+
+Failed logins
+-------------
 
 Only failures count, and they are counted twice: once per login id and once
 per client IP. When either counter reaches ``login_rate_limit_attempts`` within
@@ -18,6 +21,14 @@ unthrottled) and logs a warning.
     ...
     record_login_failure(login_id, client_ip)               # on a bad attempt
     clear_login_failures(login_id)                          # on success
+
+Submissions
+-----------
+One submission per user every ``SUBMIT_INTERVAL_SECONDS`` (FR-STD-06). The
+check and the claim are one ``SET NX``, so two requests at the same moment
+cannot both pass. It fails open like the login limiter.
+
+    retry_after = submit_retry_after(user_id)               # 0 = allowed, slot taken
 """
 
 from __future__ import annotations
@@ -30,6 +41,8 @@ from config import settings
 from db.redis import redis_client
 
 logger = logging.getLogger(__name__)
+
+SUBMIT_INTERVAL_SECONDS = 10  # FR-STD-06
 
 
 def _keys(login_id: str, client_ip: str) -> tuple[str, str]:
@@ -76,3 +89,15 @@ def clear_login_failures(login_id: str) -> None:
         redis_client.delete(f"login_fail:id:{login_id.lower()}")
     except redis.RedisError:
         logger.warning("clearing login failures failed", exc_info=True)
+
+
+def submit_retry_after(user_id: int) -> int:
+    """Claim the user's submit slot. Returns 0 when claimed, else the seconds to wait."""
+    key = f"rl:submit:{user_id}"
+    try:
+        if redis_client.set(key, "1", nx=True, ex=SUBMIT_INTERVAL_SECONDS):
+            return 0
+        return max(int(redis_client.ttl(key)), 1)
+    except redis.RedisError:
+        logger.warning("submit rate limit check failed; allowing submission", exc_info=True)
+        return 0

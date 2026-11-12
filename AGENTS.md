@@ -14,7 +14,7 @@ The page design lives in [docs/img/](docs/img/): file name shows the page title 
 
 ## What this is
 
-Flabsheet is a programming-course platform for students, staff and admins: problems, submissions, progress and a leaderboard. The current code covers auth, an audit/operation log, student account management (`/manage/students`) and problem management for staff (`/manage/problems`: list, editor, package builds through the judge). The other nav pages (`/problems`, `/manage/progress`, …) do not exist yet.
+Flabsheet is a programming-course platform for students, staff and admins: problems, submissions, progress and a leaderboard. The current code covers auth, an audit/operation log, student account management (`/manage/students`), problem management for staff (`/manage/problems`: list, editor, package builds through the judge) and solving: the problem list and problem page (`/problems`, `/problems/[slug]`, which staff open as a preview), submitting, live judging status and result reports (`/submissions/[id]`). The other nav pages (`/leaderboard`, `/manage/progress`, `/manage/submissions`, `/admin/…`) do not exist yet.
 
 ```
 browser ──► frontend (Next.js :3000) ──/api/* route handlers──► backend (FastAPI :8000) ──► PostgreSQL
@@ -72,6 +72,8 @@ docker compose -f infra/compose.yaml --env-file .env up -d
 - **Languages**: `backend/services/languages.py` is a copy of the judge's `languages.yaml` (ids and `source_name`). Add a language in the judge first, then there.
 - **Judge token and storage address**: the judge's api token equals backend `JUDGE_API_TOKEN`, and `S3_PUBLIC_ENDPOINT_URL` must be the RustFS address the judge host uses, because presigned URLs are signed for that host.
 - **Problem limits**: slug rule `^[a-z0-9-]{1,64}$`, 100 test cases, 8 MB per input, 5 MB per image, 1000-character hints and 64 KB sources live in `backend/db/models/` and `backend/routers/problems.py`, and again in `frontend/src/lib/api.ts`.
+- **Submit limits**: one submission per 10 s and at most 3 being judged per user are enforced in `backend/services/rate_limit.py` and `backend/routers/submissions.py`; `frontend/src/components/solve/solve-page.tsx` repeats them only to explain a disabled Submit button.
+- **Submission shapes**: `SubmissionOut`, `SubmissionListItem` and the SSE progress snapshot (`services/submissions.py` `progress()`) mirror `Submission`, `SubmissionListItem` and `SubmissionProgress` in `frontend/src/lib/api.ts`; `ProblemOut`/`ProblemListItem` in `backend/routers/solve.py` mirror `SolveProblem`/`SolveListItem`.
 - **New backend endpoint used by the browser**: also add a route handler under `frontend/src/app/api/...` that calls `forwardToBackend`.
 - **Client IP**: the frontend forwards `X-Forwarded-For`, and the backend trusts it only from `STACK_SUBNET` (`FORWARDED_ALLOW_IPS` in the compose files).
 

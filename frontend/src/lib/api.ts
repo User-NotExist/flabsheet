@@ -367,3 +367,188 @@ export async function uploadImage(id: number, file: Blob): Promise<string> {
   ).json();
   return `${API_URL}/images/${image.id}`;
 }
+
+// --- Instance settings ------------------------------------------------------
+// Mirrors backend/routers/settings.py.
+
+export type InstanceSettings = {
+  /** False while the admin's killswitch is on: nobody can submit. */
+  submissions_open: boolean;
+  submissions_message: string | null;
+  leaderboard_mode: "live" | "frozen" | "hidden";
+};
+
+export async function getInstanceSettings(): Promise<InstanceSettings> {
+  return (await request("/settings")).json();
+}
+
+// --- Solving problems (every role) -----------------------------------------
+// Types mirror the Pydantic models in backend/routers/solve.py.
+
+export type SolveState = "not_attempted" | "attempted" | "solved";
+
+export type SolveListItem = {
+  slug: string;
+  title: string;
+  max_points: number;
+  languages: Language[];
+  /** The viewer's current score; null before the first scored result. */
+  score_milli: number | null;
+  state: SolveState;
+};
+
+export type SolveLanguage = Language & { time_limit_ms: number };
+
+export type SampleCase = {
+  ordinal: number;
+  input: string;
+  input_truncated: boolean;
+  expected: string;
+  expected_truncated: boolean;
+};
+
+export type SolveProblem = {
+  id: number;
+  slug: string;
+  title: string;
+  statement_md: string;
+  status: ProblemStatus;
+  max_points: number;
+  memory_limit_mb: number;
+  checker_strict: boolean;
+  languages: SolveLanguage[];
+  samples: SampleCase[];
+  score_milli: number | null;
+  /** True for staff and admins: their submissions are tests, never ranked. */
+  preview: boolean;
+  /** Staff and admins only. */
+  reference: { language_id: string; source: string } | null;
+};
+
+export async function listSolveProblems(): Promise<SolveListItem[]> {
+  return (await request("/problems")).json();
+}
+
+export async function getSolveProblem(slug: string): Promise<SolveProblem> {
+  return (await request(`/problems/${encodeURIComponent(slug)}`)).json();
+}
+
+// --- Submissions ------------------------------------------------------------
+// Types mirror the Pydantic models in backend/routers/submissions.py.
+
+export type SubmissionStatus =
+  | "queued"
+  | "compiling"
+  | "running"
+  | "done"
+  | "delayed"
+  | "review";
+
+/** True once judging has ended and the result will not change by itself. */
+export function isFinalStatus(status: SubmissionStatus): boolean {
+  return status === "done" || status === "review";
+}
+
+export type SubmissionListItem = {
+  id: number;
+  language: Language;
+  status: SubmissionStatus;
+  /** A judge verdict code (AC, WA, ...); a newer judge may send unknown ones. */
+  verdict: string | null;
+  score_milli: number | null;
+  max_points: number;
+  is_staff: boolean;
+  created_at: string;
+};
+
+export type TestResult = {
+  ordinal: number;
+  visibility: TestCaseVisibility;
+  verdict: string;
+  time_ms: number | null;
+  memory_kb: number | null;
+  // The fields below are null when the viewer may not see them
+  checker_msg: string | null;
+  input: string | null;
+  input_truncated: boolean;
+  expected: string | null;
+  expected_truncated: boolean;
+  output: string | null;
+  output_truncated: boolean;
+  /** Only on a case that did not pass. */
+  hint_md: string | null;
+};
+
+export type Submission = {
+  id: number;
+  problem: { id: number; slug: string; title: string; version: number };
+  language: Language;
+  status: SubmissionStatus;
+  verdict: string | null;
+  score_milli: number | null;
+  max_points: number;
+  checker_strict: boolean;
+  attempt: number;
+  is_staff: boolean;
+  /** True when this submission sets its author's current score. */
+  is_current: boolean;
+  created_at: string;
+  finished_at: string | null;
+  source_name: string;
+  source: string;
+  compile_log: string | null;
+  tests_total: number;
+  results: TestResult[];
+  /** True when hidden-case details are included (staff, admin). */
+  staff_view: boolean;
+  author: { login_id: string; display_name: string } | null;
+  judge_reason: string | null;
+};
+
+/** One message of the live status stream. It carries no test data. */
+export type SubmissionProgress = {
+  id: number;
+  status: SubmissionStatus;
+  tests_done: number;
+  verdict: string | null;
+  score_milli: number | null;
+};
+
+export async function submitSolution(
+  slug: string,
+  language: string,
+  source: string,
+): Promise<Submission> {
+  return (
+    await post(`/problems/${encodeURIComponent(slug)}/submissions`, {
+      language,
+      source,
+    })
+  ).json();
+}
+
+/** The viewer's own submissions to one problem, newest first. */
+export async function listMySubmissions(
+  slug: string,
+): Promise<SubmissionListItem[]> {
+  return (
+    await request(`/submissions?problem=${encodeURIComponent(slug)}`)
+  ).json();
+}
+
+/**
+ * One result report. Staff get hidden-case details unless `studentView` is
+ * set, which gives them exactly what the student would see.
+ */
+export async function getSubmission(
+  id: number,
+  options: { studentView?: boolean } = {},
+): Promise<Submission> {
+  const query = options.studentView ? "?student_view=true" : "";
+  return (await request(`/submissions/${id}${query}`)).json();
+}
+
+/** URL of the live status stream (Server-Sent Events) of a submission. */
+export function submissionStreamUrl(id: number): string {
+  return `${API_URL}/submissions/${id}/stream`;
+}

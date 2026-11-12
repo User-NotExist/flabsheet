@@ -49,6 +49,11 @@ export function numericId(value: string): string | null {
   return /^\d{1,18}$/.test(value) ? value : null;
 }
 
+/** A problem slug (same rule as the backend), or null when it is anything else. */
+export function problemSlug(value: string): string | null {
+  return /^[a-z0-9-]{1,64}$/i.test(value) ? value : null;
+}
+
 const NOT_FOUND = () => Response.json({ detail: "Not found" }, { status: 404 });
 
 /**
@@ -61,6 +66,19 @@ export function forwardWithId(
   path: (id: string) => string,
 ): Promise<Response> | Response {
   const safe = numericId(id);
+  return safe === null ? NOT_FOUND() : forwardToBackend(request, path(safe));
+}
+
+/**
+ * Forward to a backend path built from a problem slug, e.g.
+ * `forwardWithSlug(request, slug, (slug) => `/problems/${slug}`)`.
+ */
+export function forwardWithSlug(
+  request: Request,
+  slug: string,
+  path: (slug: string) => string,
+): Promise<Response> | Response {
+  const safe = problemSlug(slug);
   return safe === null ? NOT_FOUND() : forwardToBackend(request, path(safe));
 }
 
