@@ -56,7 +56,7 @@ docker compose -f compose.dev.yaml -f compose.dev.judge.yaml up --build
 docker compose -f infra/compose.yaml --env-file .env up -d
 ```
 
-- Rebuild with `--build` after changing dependencies (`pyproject.toml`/`uv.lock`, `package.json`/`bun.lock`). Source changes hot-reload.
+- Rebuild with `--build` after changing backend dependencies (`pyproject.toml`/`uv.lock`). Frontend dependencies (`package.json`/`bun.lock`) live in the `frontend-node-modules` volume, which a rebuild does not replace: the frontend container runs `bun install --frozen-lockfile` at every start, so restart it (`docker compose -f compose.dev.yaml restart frontend`). Source changes hot-reload.
 - Production: `compose.prod.yaml` copies `backend/.env` and `frontend/.env` into the images. Never push those images to a registry.
 - The user's shell is **zsh**: quote globs (`find . -name '*.py'`).
 
