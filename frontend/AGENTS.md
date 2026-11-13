@@ -35,7 +35,7 @@ src/app/layout.tsx           root layout, Geist fonts, metadata template "%s · 
 src/app/(app)/               signed-in pages; layout.tsx renders <TopNav/> inside <Suspense>
 src/app/login, change-password   signed-out/account pages (wrapped in <AuthShell>, no top nav)
 src/app/api/<path>/route.ts  thin forwarders: `return forwardToBackend(request, "/<path>")`
-src/components/ui/           shadcn-generated primitives (badge, button, card, dialog, input, label, select,
+src/components/ui/           shadcn-generated primitives (badge, button, card, dialog, dropdown-menu, input, label, select,
                              switch, table, tabs, textarea)
 src/components/data-table/   <DataTable>: the shared TanStack Table v9 table (sorting, search, client-side pages)
 src/components/<feature>/    feature components (auth/, nav/, problems/, students/, solve/, submissions/, settings/)
