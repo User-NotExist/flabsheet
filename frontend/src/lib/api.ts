@@ -160,6 +160,36 @@ export async function importStudents(file: File): Promise<Blob> {
   return (await post("/students/import", data)).blob();
 }
 
+// --- Staff accounts (admin) -------------------------------------------------
+// Types mirror the Pydantic models in backend/routers/staff.py.
+
+export type StaffMember = Pick<User, "id" | "login_id" | "display_name" | "role"> & {
+  is_active: boolean;
+};
+
+export type StaffCredential = { staff: StaffMember; password: string };
+
+/** Staff and admins, admins first. */
+export async function listStaff(): Promise<StaffMember[]> {
+  return (await request("/staff")).json();
+}
+
+/** Leave `password` out to have the backend generate one. */
+export async function createStaff(loginId: string, displayName: string, password?: string): Promise<StaffCredential> {
+  return (await post("/staff", { login_id: loginId, display_name: displayName, password })).json();
+}
+
+export async function updateStaff(
+  id: number,
+  update: Partial<Pick<StaffMember, "display_name" | "is_active">>,
+): Promise<StaffMember> {
+  return (await send("PATCH", `/staff/${id}`, update)).json();
+}
+
+export async function resetStaffPassword(id: number): Promise<StaffCredential> {
+  return (await post(`/staff/${id}/reset-password`)).json();
+}
+
 /**
  * Changes the password; the backend signs out the user's other sessions.
  * Pass `null` as the current password for an account flagged
