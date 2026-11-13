@@ -38,7 +38,7 @@ src/app/api/<path>/route.ts  thin forwarders: `return forwardToBackend(request, 
 src/components/ui/           shadcn-generated primitives (badge, button, card, dialog, dropdown-menu, input, label, select,
                              switch, table, tabs, textarea)
 src/components/data-table/   <DataTable>: the shared TanStack Table v9 table (sorting, search, client-side pages)
-src/components/<feature>/    feature components (auth/, nav/, problems/, students/, solve/, submissions/, settings/)
+src/components/<feature>/    feature components (accounts/, auth/, nav/, problems/, staff/, students/, solve/, submissions/, settings/)
 src/app/(app)/manage/problems  staff problem list, /new (title + slug), /[id] (editor)
 src/app/(app)/problems       /problems (list with own scores), /[slug] (statement, editor, submit, live result, history;
                              staff see it as a preview)
