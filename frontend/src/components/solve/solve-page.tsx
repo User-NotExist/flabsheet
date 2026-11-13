@@ -305,7 +305,9 @@ export function SolvePage() {
   return (
     <>
       {preview && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-foreground px-4 py-3 text-sm text-background sm:px-6">
+        // Inverted bar in the light theme only: inverted in the dark theme it is a
+        // glaring white strip, and the outline button's white label vanishes on it
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-foreground px-4 py-3 text-sm text-background sm:px-6 dark:border-b dark:bg-card dark:text-card-foreground">
           <p className="min-w-0 flex-1 basis-80">
             <span className="font-semibold">Preview as student.</span> This is exactly what
             students see. Your submissions here are judged but never count on the leaderboard,
