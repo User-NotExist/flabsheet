@@ -1,3 +1,4 @@
+import { createDataColumnHelper, DataTable } from "@/components/data-table/data-table";
 import { MarkdownView } from "@/components/problems/markdown-view";
 import {
   formatMemory,
@@ -19,6 +20,45 @@ type ReportProps = {
    */
   layout: "table" | "cards";
 };
+
+const helper = createDataColumnHelper<TestResult>();
+const columns = helper.columns([
+  helper.accessor("ordinal", {
+    header: "Test",
+    sortFn: "basic",
+    meta: { cellClassName: "whitespace-nowrap" },
+    cell: ({ row, getValue }) => (
+      <>
+        Test {getValue()}
+        <span className="text-muted-foreground"> · {row.original.visibility}</span>
+      </>
+    ),
+  }),
+  helper.accessor("verdict", {
+    header: "Verdict",
+    sortFn: "text",
+    cell: ({ getValue }) => <VerdictBadge verdict={getValue()} />,
+  }),
+  // A test that did not run has no time or memory: it sorts last either way
+  helper.accessor((result) => result.time_ms ?? undefined, {
+    id: "time",
+    header: "Time",
+    sortFn: "basic",
+    sortUndefined: "last",
+    sortDescFirst: true,
+    meta: { align: "right", cellClassName: "whitespace-nowrap" },
+    cell: ({ row }) => formatTime(row.original.time_ms),
+  }),
+  helper.accessor((result) => result.memory_kb ?? undefined, {
+    id: "memory",
+    header: "Memory",
+    sortFn: "basic",
+    sortUndefined: "last",
+    sortDescFirst: true,
+    meta: { align: "right", cellClassName: "whitespace-nowrap" },
+    cell: ({ row }) => formatMemory(row.original.memory_kb),
+  }),
+]);
 
 /**
  * Whether the test's data may be drawn. A hidden test's data is shown to
@@ -192,37 +232,17 @@ export function ResultReport({ submission, showWhitespace, layout }: ReportProps
   );
   return (
     <div className="flex flex-col gap-4">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b text-left text-xs text-muted-foreground">
-              <th className="py-2 pr-3 font-medium">Test</th>
-              <th className="px-3 py-2 font-medium">Verdict</th>
-              <th className="px-3 py-2 text-right font-medium">Time</th>
-              <th className="py-2 pl-3 text-right font-medium">Memory</th>
-            </tr>
-          </thead>
-          <tbody>
-            {results.map((result) => (
-              <tr key={result.ordinal} className="border-b last:border-b-0">
-                <td className="py-2.5 pr-3 whitespace-nowrap">
-                  Test {result.ordinal}
-                  <span className="text-muted-foreground"> · {result.visibility}</span>
-                </td>
-                <td className="px-3 py-2.5">
-                  <VerdictBadge verdict={result.verdict} />
-                </td>
-                <td className="px-3 py-2.5 text-right whitespace-nowrap tabular-nums">
-                  {formatTime(result.time_ms)}
-                </td>
-                <td className="py-2.5 pl-3 text-right whitespace-nowrap tabular-nums">
-                  {formatMemory(result.memory_kb)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {/* At most 100 tests, read at a glance: sortable, but no search or pages */}
+      <DataTable
+        label="Test results"
+        variant="plain"
+        paginate={false}
+        data={results}
+        columns={columns}
+        getRowId={(result) => String(result.ordinal)}
+        loadingText=""
+        emptyText=""
+      />
       {detailed.length > 0 && (
         <ul className="flex flex-col gap-3">
           {detailed.map((result) => (

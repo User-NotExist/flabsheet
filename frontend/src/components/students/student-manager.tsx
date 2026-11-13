@@ -1,8 +1,9 @@
 "use client";
 
-import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { FormError } from "@/components/auth/form-error";
+import { createDataColumnHelper, DataTable } from "@/components/data-table/data-table";
 import { StudentImport } from "@/components/students/student-import";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -19,6 +20,8 @@ import {
 import { useApiError } from "@/lib/use-api-error";
 
 type StudentAction = { kind: "edit" | "status" | "reset"; student: Student };
+
+const helper = createDataColumnHelper<Student>();
 
 function PasswordNotice({ credential, onSaved }: { credential: StudentCredential; onSaved: () => void }) {
   const [copied, setCopied] = useState(false);
@@ -125,13 +128,52 @@ export function StudentManager() {
     }
   }
 
-  function openAction(kind: StudentAction["kind"], student: Student) {
+  const hasCredential = credential !== null;
+  const openAction = useCallback((kind: StudentAction["kind"], student: Student) => {
     setActionError(null);
     setAction({ kind, student });
-  }
+  }, []);
 
-  const term = query.trim().toLowerCase();
-  const visible = students?.filter((s) => s.login_id.toLowerCase().includes(term) || s.display_name.toLowerCase().includes(term));
+  // Memoised: a new column list on every render would rebuild the table's row models
+  const columns = useMemo(() => helper.columns([
+    helper.accessor("login_id", {
+      header: "Student ID",
+      sortFn: "alphanumeric",
+      enableGlobalFilter: true,
+      meta: { cellClassName: "font-mono text-xs break-all" },
+    }),
+    helper.accessor("display_name", {
+      header: "Display name",
+      sortFn: "text",
+      enableGlobalFilter: true,
+      meta: { cellClassName: "font-medium break-words" },
+    }),
+    helper.accessor((student) => (student.is_active ? "Active" : "Deactivated"), {
+      id: "status",
+      header: "Status",
+      sortFn: "text",
+      cell: ({ row, getValue }) => (
+        <span className={`rounded-full px-2 py-0.5 text-xs ${row.original.is_active ? "bg-success text-success-foreground" : "bg-muted text-muted-foreground"}`}>
+          {getValue()}
+        </span>
+      ),
+    }),
+    helper.display({
+      id: "actions",
+      header: "Actions",
+      meta: { cellClassName: "py-2" },
+      cell: ({ row: { original: student } }) => (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <Button size="sm" variant="link" className="px-0" disabled={busy} onClick={() => openAction("edit", student)}>Edit name</Button>
+          <Button size="sm" variant="link" className="px-0" disabled={busy || hasCredential} onClick={() => openAction("reset", student)}>Reset password</Button>
+          <Button size="sm" variant="link" className={student.is_active ? "px-0 text-destructive" : "px-0"} disabled={busy} onClick={() => openAction("status", student)}>
+            {student.is_active ? "Deactivate" : "Reactivate"}
+          </Button>
+        </div>
+      ),
+    }),
+  ]), [busy, hasCredential, openAction]);
+
   const actionTitle = action?.kind === "edit" ? "Edit name" : action?.kind === "reset" ? "Reset password" : action?.student.is_active ? "Deactivate student" : "Reactivate student";
 
   return (
@@ -145,48 +187,20 @@ export function StudentManager() {
 
         <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,26.5%)]">
           <section className="min-w-0">
-            <div className="mb-3 flex items-center gap-3">
-              <Label htmlFor="student-search" className="sr-only">Search by name or student ID</Label>
-              <Input id="student-search" type="search" autoComplete="off" value={query} onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by name or student ID" className="h-10 bg-card" />
-              <span role="status" className="shrink-0 text-muted-foreground">
-                {visible && `${visible.length} student${visible.length === 1 ? "" : "s"}`}
-              </span>
-            </div>
             {error && <div className="mb-3 flex items-center gap-2"><FormError message={error} /><Button variant="outline" onClick={refresh}>Retry</Button></div>}
-            <div className="overflow-x-auto rounded-xl border bg-card">
-              <table aria-label="Students" className="w-full text-left">
-                <thead className="border-b text-xs text-muted-foreground">
-                  <tr>{["Student ID", "Display name", "Status", "Actions"].map((label) =>
-                    <th key={label} scope="col" className="px-3 py-3 font-medium">{label}</th>)}</tr>
-                </thead>
-                <tbody>
-                  {(!visible || visible.length === 0) && (
-                    <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
-                      {!visible ? (error ? "Could not load students." : "Loading students…") : term ? "No students match your search." : "No students yet."}
-                    </td></tr>
-                  )}
-                  {visible?.map((student) => (
-                    <tr key={student.id} className="border-b last:border-b-0">
-                      <td className="px-3 py-3 font-mono text-xs break-all">{student.login_id}</td>
-                      <td className="px-3 py-3 font-medium break-words">{student.display_name}</td>
-                      <td className="px-3 py-3"><span className={`rounded-full px-2 py-0.5 text-xs ${student.is_active ? "bg-success text-success-foreground" : "bg-muted text-muted-foreground"}`}>
-                        {student.is_active ? "Active" : "Deactivated"}
-                      </span></td>
-                      <td className="px-3 py-2">
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                          <Button size="sm" variant="link" className="px-0" disabled={busy} onClick={() => openAction("edit", student)}>Edit name</Button>
-                          <Button size="sm" variant="link" className="px-0" disabled={busy || !!credential} onClick={() => openAction("reset", student)}>Reset password</Button>
-                          <Button size="sm" variant="link" className={student.is_active ? "px-0 text-destructive" : "px-0"} disabled={busy} onClick={() => openAction("status", student)}>
-                            {student.is_active ? "Deactivate" : "Reactivate"}
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              label="Students"
+              data={students}
+              columns={columns}
+              getRowId={(student) => String(student.id)}
+              search={{ label: "Search by name or student ID" }}
+              query={query}
+              onQueryChange={setQuery}
+              count={(rows) => `${rows} student${rows === 1 ? "" : "s"}`}
+              loadingText={error ? "Could not load students." : "Loading students…"}
+              emptyText="No students yet."
+              noMatchText="No students match your search."
+            />
             <p className="mt-3 text-xs text-muted-foreground">Deactivated students cannot sign in and are left off the leaderboard. Their submissions are kept.</p>
           </section>
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useLayoutEffect, useState } from "react";
 
 import { FormError } from "@/components/auth/form-error";
+import { createDataColumnHelper, DataTable } from "@/components/data-table/data-table";
 import { formatPoints, formatScore, shortLanguage } from "@/components/submissions/format";
 import { Badge } from "@/components/ui/badge";
 import { listSolveProblems, type SolveListItem, type SolveState } from "@/lib/api";
@@ -14,6 +15,57 @@ const STATES: Record<SolveState, { label: string; className: string }> = {
   attempted: { label: "Attempted", className: "bg-warning text-warning-foreground" },
   not_attempted: { label: "Not attempted", className: "bg-muted text-muted-foreground" },
 };
+
+// Sorting by status follows progress, not the alphabet
+const STATE_ORDER: Record<SolveState, number> = { not_attempted: 0, attempted: 1, solved: 2 };
+
+const helper = createDataColumnHelper<SolveListItem>();
+const columns = helper.columns([
+  helper.accessor("title", {
+    header: "Problem",
+    sortFn: "text",
+    enableGlobalFilter: true,
+    cell: ({ row, getValue }) => (
+      <Link
+        href={`/problems/${row.original.slug}`}
+        className="font-medium underline-offset-4 hover:underline"
+      >
+        {getValue()}
+      </Link>
+    ),
+  }),
+  helper.accessor(
+    (problem) => problem.languages.map((l) => shortLanguage(l.display)).join(", "),
+    {
+      id: "languages",
+      header: "Languages",
+      enableSorting: false,
+      enableGlobalFilter: true,
+      meta: { cellClassName: "text-foreground/75" },
+    },
+  ),
+  // No score yet sorts last either way
+  helper.accessor((problem) => problem.score_milli ?? undefined, {
+    id: "score",
+    header: "Your score",
+    sortFn: "basic",
+    sortUndefined: "last",
+    sortDescFirst: true,
+    meta: { align: "right", cellClassName: "whitespace-nowrap" },
+    cell: ({ row }) => formatScore(row.original.score_milli, row.original.max_points),
+  }),
+  helper.accessor((problem) => STATES[problem.state].label, {
+    id: "state",
+    header: "Status",
+    sortFn: (a, b) => STATE_ORDER[a.original.state] - STATE_ORDER[b.original.state],
+    enableGlobalFilter: true,
+    cell: ({ row, getValue }) => (
+      <Badge variant="secondary" className={STATES[row.original.state].className}>
+        {getValue()}
+      </Badge>
+    ),
+  }),
+]);
 
 function Tile({ label, value }: { label: string; value: string }) {
   return (
@@ -73,58 +125,17 @@ export function SolveList() {
 
       <FormError message={error} />
 
-      {problems === null && !error && (
-        <p role="status" className="text-sm text-muted-foreground">
-          Loading problems…
-        </p>
-      )}
-      {problems?.length === 0 && (
-        <p className="rounded-xl border bg-card px-4 py-8 text-center text-sm text-muted-foreground">
-          No problems are open yet. Check back when your staff enable one.
-        </p>
-      )}
-      {problems && problems.length > 0 && (
-        <div className="overflow-x-auto rounded-xl border bg-card">
-          <table className="w-full min-w-[34rem] text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs text-muted-foreground">
-                <th className="px-4 py-2.5 font-medium">Problem</th>
-                <th className="px-3 py-2.5 font-medium">Languages</th>
-                <th className="px-3 py-2.5 text-right font-medium">Your score</th>
-                <th className="px-4 py-2.5 font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {problems.map((problem) => {
-                const state = STATES[problem.state];
-                return (
-                  <tr key={problem.slug} className="border-b last:border-b-0">
-                    <td className="px-4 py-3">
-                      <Link
-                        href={`/problems/${problem.slug}`}
-                        className="font-medium underline-offset-4 hover:underline"
-                      >
-                        {problem.title}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-3 text-foreground/75">
-                      {problem.languages.map((l) => shortLanguage(l.display)).join(", ")}
-                    </td>
-                    <td className="px-3 py-3 text-right whitespace-nowrap tabular-nums">
-                      {formatScore(problem.score_milli, problem.max_points)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant="secondary" className={state.className}>
-                        {state.label}
-                      </Badge>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        label="Problems"
+        className="min-w-[34rem]"
+        data={problems}
+        columns={columns}
+        getRowId={(problem) => problem.slug}
+        search={{ label: "Search by title, language or status" }}
+        loadingText={error ? "Could not load problems." : "Loading problems…"}
+        emptyText="No problems are open yet. Check back when your staff enable one."
+        noMatchText="No problems match your search."
+      />
     </main>
   );
 }
