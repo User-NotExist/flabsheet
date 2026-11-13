@@ -12,4 +12,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
     bun install --frozen-lockfile
 
 EXPOSE 3000
-CMD ["bun", "run", "dev", "--hostname", "0.0.0.0", "--port", "3000"]
+# Install again at start: the node_modules volume outlives image rebuilds, so
+# after a pull that changes dependencies it would still hold the old set.
+# With nothing to change this takes well under a second.
+CMD ["sh", "-c", "bun install --frozen-lockfile && exec bun run dev --hostname 0.0.0.0 --port 3000"]
