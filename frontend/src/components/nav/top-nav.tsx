@@ -6,6 +6,7 @@ import { AccountMenu } from "@/components/nav/account-menu";
 import { NavLinks } from "@/components/nav/nav-links";
 import { QueueCount } from "@/components/nav/queue-count";
 import { ServerClock } from "@/components/nav/server-clock";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { navItemsFor } from "@/lib/navigation";
 import { checkSession, SESSION_COOKIE } from "@/lib/session";
 
@@ -47,6 +48,7 @@ export async function TopNav() {
       <div className="ml-auto flex shrink-0 items-center gap-6 text-sm">
         <ServerClock />
         <QueueCount />
+        <ThemeToggle />
         <AccountMenu user={user} />
       </div>
     </NavBar>

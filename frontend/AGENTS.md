@@ -38,7 +38,8 @@ src/app/api/<path>/route.ts  thin forwarders: `return forwardToBackend(request, 
 src/components/ui/           shadcn-generated primitives (badge, button, card, dialog, dropdown-menu, input, label, select,
                              switch, table, tabs, textarea)
 src/components/data-table/   <DataTable>: the shared TanStack Table v9 table (sorting, search, client-side pages)
-src/components/<feature>/    feature components (accounts/, auth/, nav/, problems/, staff/, students/, solve/, submissions/, settings/)
+src/components/<feature>/    feature components (accounts/, auth/, nav/, problems/, staff/, students/, solve/, submissions/, settings/,
+                             theme/)
 src/app/(app)/manage/problems  staff problem list, /new (title + slug), /[id] (editor)
 src/app/(app)/problems       /problems (list with own scores), /[slug] (statement, editor, submit, live result, history;
                              staff see it as a preview)
@@ -51,6 +52,8 @@ src/lib/redirect.ts          safeNextPath(): open-redirect guard for ?next=
 src/lib/use-api-error.ts     useApiError(): error → message to show, redirecting to /login on 401
 src/lib/sse.ts               useSubmissionProgress(): live judging status over SSE, polling if the stream fails
 src/lib/drafts.ts            code drafts in localStorage, keyed by user, problem and language
+src/lib/theme.ts             light/dark theme: `.dark` on <html>, stored choice, pre-paint script for the root layout
+src/lib/use-is-dark.ts       useIsDark(): the current theme in a Client Component
 ```
 
 ## How auth works here
@@ -81,6 +84,7 @@ src/lib/drafts.ts            code drafts in localStorage, keyed by user, problem
 - **Data fetching**: there is no query library. Fetch in an effect through `lib/api.ts`, keep the result in state, and after a change set that state from the response or fetch again. A hidden page re-runs its effects when it is shown again, which is what keeps scores and history fresh.
 - **Client providers in `(app)/layout.tsx` go beside `<TopNav />`, not around it**: wrapped in a client component, its session lookup fails the dev prerender check ("unstable value `Date.now()`").
 - **Results and verdicts**: draw them with `components/submissions/` (`VerdictBadge`, `ResultReport`, `LiveStatus`, `WhitespaceText`, `format.ts`), so the problem page, the submission page and the staff preview cannot drift apart. `ResultReport` hides a hidden test's data from students even if a response carried it.
+- **Theme**: the server always renders light; the inline script in `app/layout.tsx` adds `.dark` before paint. Style with the `dark:` variant, and use `useIsDark()` only where a prop needs the value (CodeMirror). Its first render is always `false`.
 - **Instance settings**: read them with `useInstanceSettings()` (killswitch, leaderboard mode); don't fetch `/api/settings` again in a page.
 
 ## Style
@@ -93,7 +97,7 @@ src/lib/drafts.ts            code drafts in localStorage, keyed by user, problem
 - Styling:
   - Use Tailwind utilities with the theme tokens in `globals.css` (`bg-primary`, `text-muted-foreground`, `text-destructive`, `bg-warning`/`text-warning-foreground`). Don't hard-code colors.
   - Add new tokens to both `:root` and `.dark`, plus `@theme inline`.
-  - Primary is green (`oklch(52% 0.15 144)`).
+  - Primary is green (`oklch(52% 0.15 144)`; `oklch(72% 0.17 144)` in the dark theme, so it stays readable as link text). Put `text-primary-foreground` on a `bg-primary` fill, not `text-foreground`.
 - UI copy:
   - Write short, sentence-case messages that end with a period.
   - Use the real ellipsis `…` in pending labels ("Signing in…").

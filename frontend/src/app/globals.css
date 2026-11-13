@@ -96,13 +96,17 @@
 }
 
 .dark {
+  /* Native scrollbars and form controls follow the theme too */
+  color-scheme: dark;
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(52% 0.15 144.061);
+  /* Lighter than the light theme's green: at 52% it is unreadable as link
+     text on a dark surface, and too light to carry this dark label */
+  --primary: oklch(72% 0.17 144.061);
   --primary-foreground: oklch(0.205 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
