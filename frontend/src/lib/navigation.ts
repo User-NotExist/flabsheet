@@ -42,6 +42,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { label: "Leaderboard", href: "/leaderboard", hrefByRole: { staff: "/manage/leaderboard", admin: "/manage/leaderboard" }},
   { label: "Staff accounts", href: "/admin/staff", roles: ADMIN },
   { label: "Settings", href: "/admin/settings", roles: ADMIN },
+  { label: "Logs", href: "/admin/logs", roles: ADMIN },
 ];
 
 export const ROLE_LABELS: Record<UserRole, string> = {

@@ -2,8 +2,8 @@
 
 /**
  * The one table of the app, driven by TanStack Table v9: sortable headers, an
- * optional search box and client-side pages. Every list is loaded whole, so
- * all three work on the rows in memory.
+ * optional search box and client-side pages. A list is normally loaded whole,
+ * so all three work on the rows in memory.
  *
  *   const helper = createDataColumnHelper<Student>();
  *   const columns = helper.columns([
@@ -18,6 +18,14 @@
  * Columns are sortable unless they set `enableSorting: false`, and searched
  * only when they set `enableGlobalFilter: true`. Keep `columns` at module
  * scope or in a memo: a new array on every render rebuilds the row models.
+ *
+ * A list too long to load whole (the operation log) passes `serverPages`
+ * instead: `data` is then one page that the caller fetched, the page controls
+ * report through `onChange`, and the headers do not sort, because the server
+ * decides the order. Leave `search` out there and filter in the request.
+ *
+ *   <DataTable … data={page?.items ?? null}
+ *     serverPages={{ total: page?.total ?? 0, pageIndex, pageSize, onChange: setPaging }} />
  */
 
 import { useId, useState, type ReactNode } from "react";
@@ -103,6 +111,17 @@ const DEFAULT_PAGE_SIZE = 25;
 // A stable stand-in while loading: a fresh [] each render would rebuild the row models
 const NO_ROWS: never[] = [];
 
+/** Paging done by the server: `data` holds only the current page. */
+export type ServerPages = {
+  /** Rows over all pages. */
+  total: number;
+  /** 0-based. */
+  pageIndex: number;
+  pageSize: number;
+  /** The reader asked for another page or page size: fetch it. */
+  onChange: (next: PaginationState) => void;
+};
+
 type DataTableProps<TData extends RowData> = {
   /** Accessible name of the table. */
   label: string;
@@ -125,6 +144,8 @@ type DataTableProps<TData extends RowData> = {
   count?: (rows: number) => string;
   /** false shows every row and no page controls. */
   paginate?: boolean;
+  /** The caller fetches each page (see the file header). Turns sorting off. */
+  serverPages?: ServerPages;
   /** "card": bordered card with padded edges. "plain": no frame, for use inside a card. */
   variant?: "card" | "plain";
   /** Classes for the <table>, e.g. a min width so it scrolls sideways on phones. */
@@ -144,16 +165,20 @@ export function DataTable<TData extends RowData>({
   onQueryChange,
   count,
   paginate = true,
+  serverPages,
   variant = "card",
   className,
 }: DataTableProps<TData>) {
   const searchId = useId();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [ownQuery, setOwnQuery] = useState("");
-  const [pagination, setPagination] = useState<PaginationState>({
+  const [ownPagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: paginate ? DEFAULT_PAGE_SIZE : Infinity,
   });
+  const pagination: PaginationState = serverPages
+    ? { pageIndex: serverPages.pageIndex, pageSize: serverPages.pageSize }
+    : ownPagination;
 
   const globalFilter = query ?? ownQuery;
   const toFirstPage = () =>
@@ -175,7 +200,16 @@ export function DataTable<TData extends RowData>({
       setSorting(updater);
       toFirstPage();
     },
-    onPaginationChange: setPagination,
+    onPaginationChange: serverPages
+      ? (updater) =>
+          serverPages.onChange(
+            typeof updater === "function" ? updater(pagination) : updater,
+          )
+      : setPagination,
+    // Server pages: `data` is already the right slice, in the server's order
+    manualPagination: !!serverPages,
+    rowCount: serverPages?.total,
+    enableSorting: !serverPages,
     // The automatic reset also fires when the rows are fetched again (after an
     // edit, or a status poll), which would throw the reader back to page 1.
     // Sorting and searching go to the first page by hand instead.
@@ -193,7 +227,8 @@ export function DataTable<TData extends RowData>({
   const pageCount = table.getPageCount();
   // The list shrank (or an outside reset cleared the search) under a later
   // page: step back to the last one that still has rows
-  if (pagination.pageIndex > 0 && pagination.pageIndex >= pageCount) {
+  // (with server pages the caller does this, when a fetch comes back empty)
+  if (!serverPages && pagination.pageIndex > 0 && pagination.pageIndex >= pageCount) {
     setPagination({ ...pagination, pageIndex: Math.max(0, pageCount - 1) });
   }
 
@@ -208,7 +243,8 @@ export function DataTable<TData extends RowData>({
           ? noMatchText
           : null;
   // Small lists keep the plain look: no page controls until they are needed
-  const showPages = paginate && data !== null && data.length > PAGE_SIZES[0];
+  const showPages =
+    paginate && data !== null && (serverPages?.total ?? data.length) > PAGE_SIZES[0];
   const firstRow = pagination.pageIndex * pagination.pageSize + 1;
 
   return (

@@ -279,6 +279,7 @@ The paths below are backend paths; they are not versioned. The browser calls the
 | --- | --- | --- |
 | Auth | `POST /auth/login`, `POST /auth/logout`, `POST /auth/logout-all` (every session of the caller), `GET /auth/me`, `POST /auth/change-password` | All |
 | Staff accounts | `GET/POST /staff`, `PATCH /staff/{id}`, `POST /staff/{id}/reset-password` | Admin |
+| Operation log | `GET /admin/logs?page=&page_size=&type=&user=&from=&to=` (newest first; `{items, total}`), `GET /admin/logs/types` | Admin |
 | Students | `GET/POST /students`, `POST /students/import` (multipart CSV → result CSV), `PATCH /students/{id}`, `POST /students/{id}/reset-password` | Staff, admin |
 | Problems (manage) | `GET/POST /admin/problems`, `GET/PATCH/DELETE /admin/problems/{id}`, `POST /admin/problems/{id}/enable`, `/disable`, `/archive`, `POST /admin/problems/{id}/images`, `POST /admin/problems/{id}/testdata`, `GET/POST /admin/problems/{id}/build`, `POST /admin/problems/{id}/rejudge` (not built yet), `GET /admin/languages`. `PATCH` saves the whole editor: its optional `config` holds limits, languages, checking mode, reference solution and the ordered test cases (each named by the SHA-256 that `/testdata` returned), so one save creates at most one version | Staff, admin |
 | Problems (solve) | `GET /problems`, `GET /problems/{slug}` (statement, limits, languages, sample cases only), `GET /images/{id}` (statement image, streamed) | All |
