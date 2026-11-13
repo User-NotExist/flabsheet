@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
+import { connection } from "next/server";
 import type { ReactNode } from "react";
 
 import { AccountMenu } from "@/components/nav/account-menu";
@@ -34,6 +35,11 @@ export function TopNavFallback() {
 /** Top bar with the pages the signed-in user's role may open. */
 export async function TopNav() {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  // cookies() alone only defers this to the runtime-prefetch stage
+  // (`partialPrefetching`), where the dev check still rejects clock reads
+  // made under the session lookup ("unstable value `Date.now()`").
+  // connection() holds the lookup back until a real request.
+  await connection();
   const session = await checkSession(token);
   // proxy.ts already redirected signed-out users; this only covers a
   // backend hiccup between the two lookups.
