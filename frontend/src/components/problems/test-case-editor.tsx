@@ -16,7 +16,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   MAX_HINT_LENGTH,
@@ -202,21 +208,28 @@ export function TestCaseEditor({ tests, onChange, built, uploadInput, disabled }
                       )}
                     </td>
                     <td className="px-2 py-2">
-                      <NativeSelect
-                        aria-label={`What students see of test ${number}`}
+                      <Select
+                        items={VISIBILITY_LABELS}
                         value={test.visibility}
                         disabled={disabled}
-                        onChange={(event) =>
-                          update(index, { visibility: event.target.value as TestCaseVisibility })
-                        }
-                        className="min-w-48"
+                        onValueChange={(visibility) => {
+                          if (visibility) update(index, { visibility });
+                        }}
                       >
-                        {Object.entries(VISIBILITY_LABELS).map(([value, label]) => (
-                          <NativeSelectOption key={value} value={value}>
-                            {label}
-                          </NativeSelectOption>
-                        ))}
-                      </NativeSelect>
+                        <SelectTrigger
+                          aria-label={`What students see of test ${number}`}
+                          className="w-full min-w-48"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(VISIBILITY_LABELS).map(([value, label]) => (
+                            <SelectItem key={value} value={value}>
+                              {label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </td>
                     <td className="px-2 py-2">
                       <Input

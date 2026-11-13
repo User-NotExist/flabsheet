@@ -30,7 +30,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   ApiError,
   MAX_SOURCE_BYTES,
@@ -381,17 +387,24 @@ export function SolvePage() {
           <section className="flex flex-col gap-3 rounded-xl border bg-card p-5">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <Label htmlFor="language">Language</Label>
-              <NativeSelect
-                id="language"
+              <Select
+                items={problem.languages.map((l) => ({ value: l.id, label: l.display }))}
                 value={language}
-                onChange={(event) => chooseLanguage(event.target.value)}
+                onValueChange={(id) => {
+                  if (id) chooseLanguage(id);
+                }}
               >
-                {problem.languages.map((l) => (
-                  <NativeSelectOption key={l.id} value={l.id}>
-                    {l.display}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
+                <SelectTrigger id="language">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {problem.languages.map((l) => (
+                    <SelectItem key={l.id} value={l.id}>
+                      {l.display}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {problem.reference && (
                 <Button
                   type="button"
