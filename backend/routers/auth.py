@@ -44,7 +44,10 @@ class LoginRequest(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    current_password: str = Field(min_length=1, max_length=MAX_PASSWORD_LENGTH)
+    # Not needed (and ignored) while the account is flagged must_change_password
+    current_password: str | None = Field(
+        default=None, min_length=1, max_length=MAX_PASSWORD_LENGTH
+    )
     new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
 
 
@@ -177,12 +180,26 @@ def logout_all(session: AccountSession, response: Response, db: Db):
 
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
 def change_password(body: ChangePasswordRequest, session: AccountSession, db: Db):
-    """Change the caller's password and sign out all their other sessions."""
+    """Change the caller's password and sign out all their other sessions.
+
+    The current password is required, except while the account is flagged
+    must_change_password: that session was just opened with the issued
+    password, so asking for it again adds nothing.
+    """
     user = db.get(User, session.user_id, with_for_update=True)
-    if user is None or not _verify_password(user.password_hash, body.current_password):
-        log_operation_now("auth.change_password_failed", user_id=session.user_id)
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")
-    if body.new_password == body.current_password:
+    if user is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
+    # Read the flag from the locked row, not the session's cached snapshot: a
+    # stale snapshot must not let a caller skip the current-password check.
+    if not user.must_change_password:
+        if body.current_password is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is required")
+        if not _verify_password(user.password_hash, body.current_password):
+            log_operation_now("auth.change_password_failed", user_id=session.user_id)
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")
+    # Compared against the stored hash because a flagged account sends no
+    # current password; it must not keep the issued one.
+    if _verify_password(user.password_hash, body.new_password):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "New password must differ from the current password"
         )

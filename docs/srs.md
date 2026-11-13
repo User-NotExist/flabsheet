@@ -132,8 +132,8 @@ Every requirement below is MUST unless marked otherwise. "Acceptance" lines stat
 | FR-AUTH-03 | Authorization is enforced server-side on every endpoint; the UI only hides what the role cannot use. | A student token calling a staff endpoint gets `403`. |
 | FR-AUTH-04 | Sessions use an HTTP-only, Secure, SameSite cookie and expire 7 days after login (configurable). There is no idle timeout. | Cookie flags present; session expires as configured. |
 | FR-AUTH-05 | Users can log out, which revokes the session server-side. | Reusing the old cookie after logout gets `401`. |
-| FR-AUTH-06 | Users can change their own password (current password required). Their other sessions are signed out. | Old password stops working immediately. |
-| FR-AUTH-07 | Accounts flagged `must_change_password` are forced to set a new password on first login. | Generated student passwords trigger the prompt. |
+| FR-AUTH-06 | Users can change their own password (current password required, except while the account is flagged `must_change_password`). Their other sessions are signed out. | Old password stops working immediately. |
+| FR-AUTH-07 | Accounts flagged `must_change_password` are forced to set a new password on first login, without entering the issued one again. | Generated student passwords trigger the prompt. |
 | FR-AUTH-08 | Failed login attempts are counted per account and, separately, per client IP (default 10 failures / 15 min each). When either count is reached, further attempts are refused until its window ends. A successful login clears the account's count only. | After 10 failures the next attempt is refused with `429` (code `rate_limited`), also from another IP for the same account, and for another account from the same IP. |
 | FR-AUTH-09 | Staff and admin can reset a student's password; admin can reset a staff password. The new password is shown once. | Reset password works; previous sessions are revoked. |
 | FR-AUTH-10 | The first admin account is created by a CLI/seed command at install, never through the web UI. | Fresh install has no web path to create an admin. |

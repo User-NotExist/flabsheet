@@ -160,13 +160,17 @@ export async function importStudents(file: File): Promise<Blob> {
   return (await post("/students/import", data)).blob();
 }
 
-/** Changes the password; the backend signs out the user's other sessions. */
+/**
+ * Changes the password; the backend signs out the user's other sessions.
+ * Pass `null` as the current password for an account flagged
+ * `must_change_password`: the backend does not ask for it there.
+ */
 export async function changePassword(
-  currentPassword: string,
+  currentPassword: string | null,
   newPassword: string,
 ): Promise<void> {
   await post("/auth/change-password", {
-    current_password: currentPassword,
+    ...(currentPassword !== null && { current_password: currentPassword }),
     new_password: newPassword,
   });
 }
