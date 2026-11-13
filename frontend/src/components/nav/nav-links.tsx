@@ -22,7 +22,7 @@ export function NavLinks({ items }: { items: NavLink[] }) {
               className={cn(
                 "flex items-center border-b-2 px-3 text-sm whitespace-nowrap transition-colors",
                 active
-                  ? "bg-primary font-medium text-primary-foreground"
+                  ? "border-primary font-medium text-foreground"
                   : "border-transparent text-foreground/75 hover:text-foreground",
               )}
             >
