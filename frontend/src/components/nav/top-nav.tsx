@@ -2,11 +2,11 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { LogoutButton } from "@/components/nav/logout-button";
+import { AccountMenu } from "@/components/nav/account-menu";
 import { NavLinks } from "@/components/nav/nav-links";
 import { QueueCount } from "@/components/nav/queue-count";
 import { ServerClock } from "@/components/nav/server-clock";
-import { navItemsFor, ROLE_LABELS } from "@/lib/navigation";
+import { navItemsFor } from "@/lib/navigation";
 import { checkSession, SESSION_COOKIE } from "@/lib/session";
 
 function NavBar({ children }: { children?: ReactNode }) {
@@ -47,10 +47,7 @@ export async function TopNav() {
       <div className="ml-auto flex shrink-0 items-center gap-6 text-sm">
         <ServerClock />
         <QueueCount />
-        <span className="hidden text-muted-foreground sm:inline">
-          {user.display_name} · {ROLE_LABELS[user.role]}
-        </span>
-        <LogoutButton />
+        <AccountMenu user={user} />
       </div>
     </NavBar>
   );
