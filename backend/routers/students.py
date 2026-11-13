@@ -25,7 +25,7 @@ from services.auth import require_role
 from services.errors import ApiError
 from services.operation_log import log_operation
 from services.session import SessionData, invalidate_user_sessions, revoke_user_sessions
-from services.students import new_student, reset_student_password
+from services.students import new_student, issue_password
 
 router = APIRouter(prefix="/students", tags=["students"])
 # Each Argon2id job uses 64 MiB; share this limit across concurrent imports.
@@ -125,7 +125,7 @@ def edit_student(user_id: int, body: StudentPatch, db: Db, session: Staff):
 @router.post("/{user_id}/reset-password", response_model=StudentCredential)
 def reset_password(user_id: int, db: Db, session: Staff, response: Response):
     student = _student_for_update(db, user_id)
-    password = reset_student_password(student)
+    password = issue_password(student)
     log_operation(db, "student.reset_password", user_id=session.user_id, info={"student_id": user_id})
     revoke_user_sessions(db, user_id)
     response.headers["Cache-Control"] = "no-store"
