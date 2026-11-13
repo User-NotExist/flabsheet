@@ -34,6 +34,7 @@ db/models/submission.py Submission, SubmissionResult, JudgeEvent, JudgeOutbox, P
 db/models/instance_settings.py  InstanceSettings (single row id=1, seeded on table creation) + LeaderboardMode enum
 routers/<area>.py       APIRouter(prefix="/<area>", tags=["<area>"]); request/response Pydantic models live here
 routers/problems.py     /admin/problems (staff, admin): list, editor save, versions, test data and image upload, enable/disable/archive/delete, rebuild
+routers/staff.py        /staff (admin): list staff and admins, create (generated or chosen password), edit name, deactivate/reactivate, reset password
 routers/images.py       GET /images/{id}: statement images streamed from storage
 routers/solve.py        GET /problems, /problems/{slug} (every role): enabled problems, statement, sample cases; staff preview
 routers/submissions.py  POST /problems/{slug}/submissions, GET /submissions, /submissions/queue (instance-wide queued count), /submissions/{id}, /submissions/{id}/stream (SSE, the one async route)
