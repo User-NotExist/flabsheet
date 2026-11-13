@@ -28,7 +28,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -508,22 +514,28 @@ export function ProblemEditor() {
             <div className="flex flex-col gap-4">
               <div className="flex max-w-xs flex-col gap-2">
                 <Label htmlFor="reference_language">Language</Label>
-                <NativeSelect
-                  id="reference_language"
-                  className="w-full"
+                <Select
+                  items={languages.map((l) => ({ value: l.id, label: l.display }))}
                   value={form.reference_language}
                   disabled={readOnly}
-                  onChange={(event) => set({ reference_language: event.target.value })}
+                  onValueChange={(reference_language) => {
+                    if (reference_language) set({ reference_language });
+                  }}
                 >
-                  {/* Keep the saved choice selectable even after it was unticked */}
-                  {languages
-                    .filter((l) => allowed.includes(l) || l.id === form.reference_language)
-                    .map((language) => (
-                      <NativeSelectOption key={language.id} value={language.id}>
-                        {language.display}
-                      </NativeSelectOption>
-                    ))}
-                </NativeSelect>
+                  <SelectTrigger id="reference_language" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* Keep the saved choice selectable even after it was unticked */}
+                    {languages
+                      .filter((l) => allowed.includes(l) || l.id === form.reference_language)
+                      .map((language) => (
+                        <SelectItem key={language.id} value={language.id}>
+                          {language.display}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
               </div>
               <CodeEditor
                 value={form.reference_source}
