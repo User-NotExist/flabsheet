@@ -37,8 +37,8 @@ src/app/login, change-password   signed-out/account pages (wrapped in <AuthShell
 src/app/api/<path>/route.ts  thin forwarders: `return forwardToBackend(request, "/<path>")`
 src/components/ui/           shadcn-generated primitives (badge, button, card, dialog, dropdown-menu, input, label, select,
                              switch, table, tabs, textarea)
-src/components/data-table/   <DataTable>: the shared TanStack Table v9 table (sorting, search, client-side pages)
-src/components/<feature>/    feature components (accounts/, auth/, nav/, problems/, staff/, students/, solve/, submissions/, settings/,
+src/components/data-table/   <DataTable>: the shared TanStack Table v9 table (sorting, search, client-side pages; `serverPages` for a list paged by the backend)
+src/components/<feature>/    feature components (accounts/, auth/, logs/, nav/, problems/, staff/, students/, solve/, submissions/, settings/,
                              theme/)
 src/app/(app)/manage/problems  staff problem list, /new (title + slug), /[id] (editor)
 src/app/(app)/problems       /problems (list with own scores), /[slug] (statement, editor, submit, live result, history;
@@ -68,7 +68,7 @@ src/lib/use-is-dark.ts       useIsDark(): the current theme in a Client Componen
 
 - **Page**: create `src/app/(app)/<route>/page.tsx` with a default export and `export const metadata: Metadata = { title: "…" }`. If only some roles should see it, add or adjust its `NAV_ITEMS` entry; that one entry controls both the nav link and proxy access for everything below the path. An `hrefByRole` target (such as `/manage/problems`) is a section too: only the roles mapped to it may open pages below it.
 - **Backend call**: add the route handler under `src/app/api/...` (one exported function per method), then add a typed wrapper in `lib/api.ts` with snake_case fields matching the backend Pydantic models. For a path with an id, use `forwardWithId` (it refuses anything but digits, so a segment like `..` cannot reach another backend route); for a problem slug, `forwardWithSlug`. For a long-lived response (SSE), pass `{ stream: true }` to `forwardToBackend`, or its 30 s timeout cuts the stream.
-- **Table of data**: render it with `<DataTable>` from `components/data-table/data-table.tsx` and columns from `createDataColumnHelper<Row>()` (usage in the file header), not a hand-written `<table>`. Keep the column list at module scope or in `useMemo`. The package is **TanStack Table v9** (`useTable`, `tableFeatures`), not v8: its guides are in `node_modules/@tanstack/react-table/skills/` and `node_modules/@tanstack/table-core/skills/`. The test case editor (`problems/test-case-editor.tsx`) is a form grid and stays a plain `<table>`.
+- **Table of data**: render it with `<DataTable>` from `components/data-table/data-table.tsx` and columns from `createDataColumnHelper<Row>()` (usage in the file header), not a hand-written `<table>`. Keep the column list at module scope or in `useMemo`. The package is **TanStack Table v9** (`useTable`, `tableFeatures`), not v8: its guides are in `node_modules/@tanstack/react-table/skills/` and `node_modules/@tanstack/table-core/skills/`. A list too long to load whole passes `serverPages` and fetches each page itself (`logs/log-viewer.tsx`): sorting is then off and filters go in the request. The test case editor (`problems/test-case-editor.tsx`) is a form grid and stays a plain `<table>`.
 - **Server-only data**: Server Components can read the session with `cookies()` + `checkSession()` (see `top-nav.tsx`). With `cacheComponents`, anything that reads cookies or headers must render inside a `<Suspense>` boundary with a fallback that matches the layout.
 
 ## Gotchas

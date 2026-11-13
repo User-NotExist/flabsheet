@@ -61,6 +61,7 @@ Fifteen routes cover the MVP; staff pages are also available to admin.
 | `/manage/leaderboard` | Staff | Live leaderboard + Live / Hidden / Frozen control | FR-MON-07 |
 | `/admin/staff` | Admin | Create, edit, deactivate staff; reset password | FR-ADM-01–04 |
 | `/admin/settings` | Admin | Submission killswitch with banner message | FR-ADM-05 |
+| `/admin/logs` | Admin | The operation log as a table, newest first, paged by the server; filters for type, user and date range | NFR-SEC-09 |
 
 ## Shared components
 

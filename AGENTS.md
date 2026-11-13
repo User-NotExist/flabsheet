@@ -14,7 +14,7 @@ The page design lives in [docs/img/](docs/img/): file name shows the page title 
 
 ## What this is
 
-Flabsheet is a programming-course platform for students, staff and admins: problems, submissions, progress and a leaderboard. The current code covers auth, an audit/operation log, student account management (`/manage/students`), problem management for staff (`/manage/problems`: list, editor, package builds through the judge) and solving: the problem list and problem page (`/problems`, `/problems/[slug]`, which staff open as a preview), submitting, live judging status and result reports (`/submissions/[id]`). The other nav pages (`/leaderboard`, `/manage/progress`, `/manage/submissions`, `/admin/…`) do not exist yet.
+Flabsheet is a programming-course platform for students, staff and admins: problems, submissions, progress and a leaderboard. The current code covers auth, an audit/operation log and the admin page that reads it (`/admin/logs`), student account management (`/manage/students`), problem management for staff (`/manage/problems`: list, editor, package builds through the judge) and solving: the problem list and problem page (`/problems`, `/problems/[slug]`, which staff open as a preview), submitting, live judging status and result reports (`/submissions/[id]`). The other nav pages (`/leaderboard`, `/manage/progress`, `/manage/submissions`, `/admin/…`) do not exist yet.
 
 ```
 browser ──► frontend (Next.js :3000) ──/api/* route handlers──► backend (FastAPI :8000) ──► PostgreSQL
