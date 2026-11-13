@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 
 import { FormError } from "@/components/auth/form-error";
+import { createDataColumnHelper, DataTable } from "@/components/data-table/data-table";
 import {
   BuildBadge,
   StatusBadge,
@@ -20,6 +21,8 @@ import {
 import { useApiError } from "@/lib/use-api-error";
 
 const POLL_MS = 5000; // only while a build is pending
+
+const helper = createDataColumnHelper<ProblemListItem>();
 
 /** "C++20 (g++ 13)" → "C++20": the table has no room for the toolchain. */
 function shortName(display: string): string {
@@ -97,28 +100,117 @@ export function ProblemList() {
     };
   }, [building]);
 
-  async function toggle(problem: ProblemListItem, enable: boolean) {
-    setTogglingId(problem.id);
-    setError(null);
-    try {
-      const detail = await setProblemState(
-        problem.id,
-        enable ? "enable" : "disable",
-      );
-      setProblems(
-        (items) =>
-          items?.map((item) =>
-            item.id === detail.id
-              ? { ...item, status: detail.status, can_enable: detail.can_enable }
-              : item,
-          ) ?? null,
-      );
-    } catch (err) {
-      setError(toMessage(err));
-    } finally {
-      setTogglingId(null);
-    }
-  }
+  const toggle = useCallback(
+    async (problem: ProblemListItem, enable: boolean) => {
+      setTogglingId(problem.id);
+      setError(null);
+      try {
+        const detail = await setProblemState(
+          problem.id,
+          enable ? "enable" : "disable",
+        );
+        setProblems(
+          (items) =>
+            items?.map((item) =>
+              item.id === detail.id
+                ? { ...item, status: detail.status, can_enable: detail.can_enable }
+                : item,
+            ) ?? null,
+        );
+      } catch (err) {
+        setError(toMessage(err));
+      } finally {
+        setTogglingId(null);
+      }
+    },
+    [toMessage],
+  );
+
+  // Memoised: a new column list on every render would rebuild the table's row models
+  const columns = useMemo(
+    () =>
+      helper.columns([
+        helper.accessor("title", {
+          header: "Problem",
+          sortFn: "text",
+          enableGlobalFilter: true,
+          cell: ({ row, getValue }) => (
+            <Link
+              href={`/manage/problems/${row.original.id}`}
+              className="font-medium underline-offset-4 hover:underline"
+            >
+              {getValue()}
+            </Link>
+          ),
+        }),
+        helper.accessor("status", {
+          header: "Status",
+          sortFn: "text",
+          enableGlobalFilter: true,
+          cell: ({ getValue }) => <StatusBadge status={getValue()} />,
+        }),
+        helper.accessor((problem) => problem.build_status ?? undefined, {
+          id: "build",
+          header: "Build",
+          sortFn: "text",
+          sortUndefined: "last",
+          cell: ({ row }) => <BuildBadge status={row.original.build_status} />,
+        }),
+        helper.accessor(
+          (problem) =>
+            problem.languages.map((id) => languageNames[id] ?? id).join(", "),
+          {
+            id: "languages",
+            header: "Languages",
+            enableSorting: false,
+            enableGlobalFilter: true,
+            meta: { cellClassName: "text-foreground/75" },
+            cell: ({ getValue }) => getValue() || "—",
+          },
+        ),
+        helper.accessor("submission_count", {
+          header: "Submissions",
+          sortFn: "basic",
+          sortDescFirst: true,
+          meta: { align: "right" },
+        }),
+        helper.accessor((problem) => Date.parse(problem.updated_at), {
+          id: "updated",
+          header: "Updated",
+          sortFn: "basic",
+          sortDescFirst: true,
+          meta: { cellClassName: "whitespace-nowrap text-foreground/75" },
+          cell: ({ row }) => formatUpdated(row.original.updated_at),
+        }),
+        helper.display({
+          id: "visible",
+          header: "Visible to students",
+          cell: ({ row: { original: problem } }) => {
+            const blocked = enableBlockedReason(
+              problem.status,
+              problem.can_enable,
+              problem.build_status,
+            );
+            return (
+              <div className="flex items-center gap-2.5">
+                <Switch
+                  aria-label={`Show ${problem.title} to students`}
+                  checked={problem.status === "enabled"}
+                  disabled={blocked !== null || togglingId === problem.id}
+                  onCheckedChange={(checked) => toggle(problem, checked)}
+                />
+                {blocked && (
+                  <span className="text-xs whitespace-nowrap text-muted-foreground">
+                    {blocked}
+                  </span>
+                )}
+              </div>
+            );
+          },
+        }),
+      ]),
+    [languageNames, togglingId, toggle],
+  );
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 sm:p-6">
@@ -139,88 +231,18 @@ export function ProblemList() {
 
       <FormError message={error} />
 
-      <div className="overflow-x-auto rounded-xl border bg-card">
-        <table className="w-full min-w-[46rem] text-sm">
-          <thead>
-            <tr className="border-b text-left text-xs text-muted-foreground">
-              <th className="px-4 py-2.5 font-medium">Problem</th>
-              <th className="px-3 py-2.5 font-medium">Status</th>
-              <th className="px-3 py-2.5 font-medium">Build</th>
-              <th className="px-3 py-2.5 font-medium">Languages</th>
-              <th className="px-3 py-2.5 text-right font-medium">Submissions</th>
-              <th className="px-3 py-2.5 font-medium">Updated</th>
-              <th className="px-4 py-2.5 font-medium">Visible to students</th>
-            </tr>
-          </thead>
-          <tbody>
-            {problems === null && !error && (
-              <tr>
-                <td colSpan={7} role="status" className="px-4 py-8 text-center text-muted-foreground">
-                  Loading problems…
-                </td>
-              </tr>
-            )}
-            {problems?.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
-                  No problems yet. Create the first one with “New problem”.
-                </td>
-              </tr>
-            )}
-            {problems?.map((problem) => {
-              const blocked = enableBlockedReason(
-                problem.status,
-                problem.can_enable,
-                problem.build_status,
-              );
-              return (
-                <tr key={problem.id} className="border-b last:border-b-0">
-                  <td className="px-4 py-3">
-                    <Link
-                      href={`/manage/problems/${problem.id}`}
-                      className="font-medium underline-offset-4 hover:underline"
-                    >
-                      {problem.title}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-3">
-                    <StatusBadge status={problem.status} />
-                  </td>
-                  <td className="px-3 py-3">
-                    <BuildBadge status={problem.build_status} />
-                  </td>
-                  <td className="px-3 py-3 text-foreground/75">
-                    {problem.languages
-                      .map((id) => languageNames[id] ?? id)
-                      .join(", ") || "—"}
-                  </td>
-                  <td className="px-3 py-3 text-right tabular-nums">
-                    {problem.submission_count}
-                  </td>
-                  <td className="px-3 py-3 whitespace-nowrap text-foreground/75">
-                    {formatUpdated(problem.updated_at)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <Switch
-                        aria-label={`Show ${problem.title} to students`}
-                        checked={problem.status === "enabled"}
-                        disabled={blocked !== null || togglingId === problem.id}
-                        onCheckedChange={(checked) => toggle(problem, checked)}
-                      />
-                      {blocked && (
-                        <span className="text-xs whitespace-nowrap text-muted-foreground">
-                          {blocked}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        label="Problems"
+        className="min-w-[46rem]"
+        data={problems}
+        columns={columns}
+        getRowId={(problem) => String(problem.id)}
+        search={{ label: "Search by title, status or language" }}
+        count={(rows) => `${rows} problem${rows === 1 ? "" : "s"}`}
+        loadingText={error ? "Could not load problems." : "Loading problems…"}
+        emptyText="No problems yet. Create the first one with “New problem”."
+        noMatchText="No problems match your search."
+      />
 
       <p className="text-sm text-muted-foreground">
         A problem can be enabled once a build has succeeded. While a later
