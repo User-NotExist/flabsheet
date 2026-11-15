@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useLayoutEffect, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import {
   AUTH_BUTTON_CLASS,
@@ -25,9 +31,12 @@ export function ChangePasswordForm() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  // True when the account was flagged to change its password before going on
+  // True when the account was flagged to change its password before going on.
+  // Such a user just signed in with the issued password, so the form does not
+  // ask for it again (the backend skips the check for flagged accounts too).
   const [forced, setForced] = useState(false);
   const [loginId, setLoginId] = useState<string | null>(null);
+  const newPasswordRef = useRef<HTMLInputElement>(null);
 
   // The router keeps this page mounted (hidden) after navigating away, so
   // clear the submit state and typed passwords instead of restoring them.
@@ -45,6 +54,8 @@ export function ChangePasswordForm() {
         if (cancelled) return;
         setForced(user.must_change_password);
         setLoginId(user.login_id);
+        // The focused current-password field is about to be removed
+        if (user.must_change_password) newPasswordRef.current?.focus();
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 401) {
@@ -59,7 +70,7 @@ export function ChangePasswordForm() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const current = String(form.get("current_password") ?? "");
+    const current = forced ? null : String(form.get("current_password") ?? "");
     const next = String(form.get("new_password") ?? "");
     const confirm = String(form.get("confirm_password") ?? "");
 
@@ -118,18 +129,20 @@ export function ChangePasswordForm() {
             continue.
           </p>
         )}
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="current_password">Current password</Label>
-          <Input
-            id="current_password"
-            name="current_password"
-            type="password"
-            autoComplete="current-password"
-            className={AUTH_INPUT_CLASS}
-            required
-            autoFocus
-          />
-        </div>
+        {!forced && (
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="current_password">Current password</Label>
+            <Input
+              id="current_password"
+              name="current_password"
+              type="password"
+              autoComplete="current-password"
+              className={AUTH_INPUT_CLASS}
+              required
+              autoFocus
+            />
+          </div>
+        )}
         <div className="flex flex-col gap-2">
           <Label htmlFor="new_password">New password</Label>
           <Input
@@ -140,6 +153,7 @@ export function ChangePasswordForm() {
             minLength={MIN_PASSWORD_LENGTH}
             className={AUTH_INPUT_CLASS}
             required
+            ref={newPasswordRef}
           />
         </div>
         <div className="flex flex-col gap-2">

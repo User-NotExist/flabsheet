@@ -10,7 +10,7 @@ import db.models.student_import
 import db.models.problem
 import db.models.submission
 import db.models.instance_settings
-from routers import auth, images, internal, problems, settings as settings_router, solve, students, submissions, admin_submissions
+from routers import auth, images, internal, logs, problems, settings as settings_router, solve, staff, students, submissions, admin_submissions
 from services.errors import ApiError, api_error_handler
 from services.storage import StorageError, storage_error_handler
 
@@ -33,6 +33,7 @@ Base.metadata.create_all(engine)
 
 app.include_router(auth.router)
 app.include_router(students.router)
+app.include_router(staff.router)
 app.include_router(problems.router)
 app.include_router(images.router)
 app.include_router(solve.router)
@@ -40,6 +41,7 @@ app.include_router(submissions.router)
 app.include_router(admin_submissions.router)
 app.include_router(admin_submissions.export_router)
 app.include_router(settings_router.router)
+app.include_router(logs.router)
 app.include_router(internal.router)
 
 

@@ -38,6 +38,7 @@ routers/<area>.py       one APIRouter per area, with its request/response models
   solve.py              GET /problems, /problems/{slug}: what the solver sees
   submissions.py        submit, own history, result report, SSE stream
   settings.py           GET /settings, GET /settings/time (the endpoints that change settings are planned)
+  logs.py               GET /admin/logs (paged, filtered), GET /admin/logs/types
   internal.py           judge endpoints: judge-events, job refresh
   planned: staff.py, monitoring.py, leaderboard.py
 services/<area>.py      logic shared by routers and background jobs

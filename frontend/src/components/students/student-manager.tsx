@@ -2,6 +2,7 @@
 
 import { type FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { PasswordNotice } from "@/components/accounts/password-notice";
 import { FormError } from "@/components/auth/form-error";
 import { createDataColumnHelper, DataTable } from "@/components/data-table/data-table";
 import { StudentImport } from "@/components/students/student-import";
@@ -22,35 +23,6 @@ import { useApiError } from "@/lib/use-api-error";
 type StudentAction = { kind: "edit" | "status" | "reset"; student: Student };
 
 const helper = createDataColumnHelper<Student>();
-
-function PasswordNotice({ credential, onSaved }: { credential: StudentCredential; onSaved: () => void }) {
-  const [copied, setCopied] = useState(false);
-  const [copyError, setCopyError] = useState(false);
-  const { student, password } = credential;
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(password);
-      setCopied(true);
-      setCopyError(false);
-    } catch {
-      setCopyError(true);
-    }
-  }
-
-  return (
-    <section aria-label="Generated password" className="flex flex-wrap items-center gap-3 rounded-xl border border-primary bg-card px-4 py-3">
-      <div role="status" className="mr-auto">
-        <h2 className="font-semibold">Password for {student.login_id} ({student.display_name})</h2>
-        <p className="text-muted-foreground">This is the only time it is shown. The student must change it at first login.</p>
-      </div>
-      <code className="rounded-md bg-muted px-3 py-2 select-all">{password}</code>
-      <Button variant="outline" onClick={copy}>{copied ? "Copied" : "Copy"}</Button>
-      <Button className="bg-foreground text-background hover:bg-foreground/85" onClick={onSaved}>I have saved it</Button>
-      {copyError && <p role="status" className="w-full text-muted-foreground">Select the password and copy it manually.</p>}
-    </section>
-  );
-}
 
 export function StudentManager() {
   const toMessage = useApiError();
@@ -183,7 +155,7 @@ export function StudentManager() {
           <h1 className="text-xl font-semibold tracking-tight">Students</h1>
           <p className="mt-1 text-muted-foreground">The student ID is the login ID. Passwords are generated here and shown only once.</p>
         </header>
-        {credential && <PasswordNotice credential={credential} onSaved={() => setCredential(null)} />}
+        {credential && <PasswordNotice account={credential.student} password={credential.password} who="The student" onSaved={() => setCredential(null)} />}
 
         <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,26.5%)]">
           <section className="min-w-0">

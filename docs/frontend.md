@@ -48,7 +48,7 @@ Fifteen routes cover the MVP; staff pages are also available to admin.
 | Route | Role | What it does | Covers |
 | --- | --- | --- | --- |
 | `/login` | All | ID + password form, generic error on failure, rate-limit message | FR-AUTH-01, 08 |
-| `/change-password` | All | Change own password; forced on first login when `must_change_password` is set | FR-AUTH-06, 07 |
+| `/change-password` | All | Change own password; forced on first login when `must_change_password` is set, and then without the current-password field | FR-AUTH-06, 07 |
 | `/problems` | Student | Enabled problems with max points, current score and status badge (not attempted / attempted / solved) | FR-STD-01 |
 | `/problems/[slug]` | Student | Rendered statement, limits, languages, sample cases; split view with code editor, language picker, Submit, live status, result report, own history | FR-STD-04–09, FR-ADM-05 banner |
 | `/submissions/[id]` | Student (own), staff | Full result report; staff view adds source, hidden-case results and compiler log | FR-STD-08, FR-MON-02 |
@@ -61,6 +61,7 @@ Fifteen routes cover the MVP; staff pages are also available to admin.
 | `/manage/leaderboard` | Staff | Live leaderboard + Live / Hidden / Frozen control | FR-MON-07 |
 | `/admin/staff` | Admin | Create, edit, deactivate staff; reset password | FR-ADM-01–04 |
 | `/admin/settings` | Admin | Submission killswitch with banner message | FR-ADM-05 |
+| `/admin/logs` | Admin | The operation log as a table, newest first, paged by the server; filters for type, user and date range | NFR-SEC-09 |
 
 ## Shared components
 

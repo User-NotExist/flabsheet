@@ -4,7 +4,8 @@ Usage:
     uv run python cli.py seed-admin --login-id admin --display-name "Administrator"
     uv run python cli.py seed-students
 
-The admin password comes from ADMIN_PASSWORD or an interactive prompt.
+The admin password comes from ADMIN_PASSWORD or an interactive prompt. Without
+--login-id / --display-name, an interactive run asks for them too.
 Seeded students receive individual, generated first-login passwords.
 """
 
@@ -59,7 +60,18 @@ def read_password() -> str:
     return password
 
 
+def ask(prompt: str, value: str | None, default: str) -> str:
+    """The flag value if given, else a prompt (interactive) or the default."""
+    if value is not None:
+        return value
+    if not sys.stdin.isatty():
+        return default
+    return input(f"{prompt} [{default}]: ").strip() or default
+
+
 def seed_admin(args: argparse.Namespace) -> None:
+    args.login_id = ask("Login ID", args.login_id, "admin")
+    args.display_name = ask("Display name", args.display_name, "Administrator")
     if not LOGIN_ID_RE.fullmatch(args.login_id):
         sys.exit("error: login id must be 1-64 chars of A-Z a-z 0-9 . _ -")
     if not 1 <= len(args.display_name) <= 100:
@@ -136,8 +148,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("seed-admin", help="create the initial admin user")
-    p.add_argument("--login-id", default="admin", help="login id (default: admin)")
-    p.add_argument("--display-name", default="Administrator", help="display name (default: Administrator)")
+    # Left out: asked for interactively, else the default.
+    p.add_argument("--login-id", help="login id (default: admin)")
+    p.add_argument("--display-name", help="display name (default: Administrator)")
     p.add_argument(
         "--must-change-password",
         action="store_true",

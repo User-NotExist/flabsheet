@@ -160,13 +160,96 @@ export async function importStudents(file: File): Promise<Blob> {
   return (await post("/students/import", data)).blob();
 }
 
-/** Changes the password; the backend signs out the user's other sessions. */
+// --- Staff accounts (admin) -------------------------------------------------
+// Types mirror the Pydantic models in backend/routers/staff.py.
+
+export type StaffMember = Pick<User, "id" | "login_id" | "display_name" | "role"> & {
+  is_active: boolean;
+};
+
+export type StaffCredential = { staff: StaffMember; password: string };
+
+/** Staff and admins, admins first. */
+export async function listStaff(): Promise<StaffMember[]> {
+  return (await request("/staff")).json();
+}
+
+/** Leave `password` out to have the backend generate one. */
+export async function createStaff(loginId: string, displayName: string, password?: string): Promise<StaffCredential> {
+  return (await post("/staff", { login_id: loginId, display_name: displayName, password })).json();
+}
+
+export async function updateStaff(
+  id: number,
+  update: Partial<Pick<StaffMember, "display_name" | "is_active">>,
+): Promise<StaffMember> {
+  return (await send("PATCH", `/staff/${id}`, update)).json();
+}
+
+export async function resetStaffPassword(id: number): Promise<StaffCredential> {
+  return (await post(`/staff/${id}/reset-password`)).json();
+}
+
+/** One row of the operation log. `user` is null for system events. */
+export type OperationLogEntry = {
+  id: number;
+  created_at: string;
+  /** Dotted name such as "auth.login_failed". */
+  type: string;
+  /** As stored: JSON text of an object, or a plain string. */
+  info: string | null;
+  user: Pick<User, "id" | "login_id" | "display_name" | "role"> | null;
+};
+
+export type OperationLogPage = {
+  items: OperationLogEntry[];
+  /** Rows matching the filters, over all pages. */
+  total: number;
+};
+
+export type OperationLogQuery = {
+  /** 1-based. */
+  page: number;
+  pageSize: number;
+  type?: string;
+  /** Part of the acting user's login ID or display name. */
+  user?: string;
+  /** ISO times with an offset: `from` is inclusive, `to` exclusive. */
+  from?: string;
+  to?: string;
+};
+
+/** One page of the operation log, newest first (admin only). */
+export async function listOperationLogs(
+  query: OperationLogQuery,
+): Promise<OperationLogPage> {
+  const params = new URLSearchParams({
+    page: String(query.page),
+    page_size: String(query.pageSize),
+  });
+  if (query.type) params.set("type", query.type);
+  if (query.user) params.set("user", query.user);
+  if (query.from) params.set("from", query.from);
+  if (query.to) params.set("to", query.to);
+  return (await request(`/admin/logs?${params}`)).json();
+}
+
+/** Every operation type the log contains, sorted (admin only). */
+export async function listOperationLogTypes(): Promise<string[]> {
+  return (await request("/admin/logs/types")).json();
+}
+
+/**
+ * Changes the password; the backend signs out the user's other sessions.
+ * Pass `null` as the current password for an account flagged
+ * `must_change_password`: the backend does not ask for it there.
+ */
 export async function changePassword(
-  currentPassword: string,
+  currentPassword: string | null,
   newPassword: string,
 ): Promise<void> {
   await post("/auth/change-password", {
-    current_password: currentPassword,
+    ...(currentPassword !== null && { current_password: currentPassword }),
     new_password: newPassword,
   });
 }

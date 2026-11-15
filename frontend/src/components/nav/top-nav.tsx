@@ -1,12 +1,14 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
+import { connection } from "next/server";
 import type { ReactNode } from "react";
 
-import { LogoutButton } from "@/components/nav/logout-button";
+import { AccountMenu } from "@/components/nav/account-menu";
 import { NavLinks } from "@/components/nav/nav-links";
 import { QueueCount } from "@/components/nav/queue-count";
 import { ServerClock } from "@/components/nav/server-clock";
-import { navItemsFor, ROLE_LABELS } from "@/lib/navigation";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { navItemsFor } from "@/lib/navigation";
 import { checkSession, SESSION_COOKIE } from "@/lib/session";
 
 function NavBar({ children }: { children?: ReactNode }) {
@@ -33,6 +35,11 @@ export function TopNavFallback() {
 /** Top bar with the pages the signed-in user's role may open. */
 export async function TopNav() {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  // cookies() alone only defers this to the runtime-prefetch stage
+  // (`partialPrefetching`), where the dev check still rejects clock reads
+  // made under the session lookup ("unstable value `Date.now()`").
+  // connection() holds the lookup back until a real request.
+  await connection();
   const session = await checkSession(token);
   // proxy.ts already redirected signed-out users; this only covers a
   // backend hiccup between the two lookups.
@@ -47,10 +54,8 @@ export async function TopNav() {
       <div className="ml-auto flex shrink-0 items-center gap-6 text-sm">
         <ServerClock />
         <QueueCount />
-        <span className="hidden text-muted-foreground sm:inline">
-          {user.display_name} · {ROLE_LABELS[user.role]}
-        </span>
-        <LogoutButton />
+        <ThemeToggle />
+        <AccountMenu user={user} />
       </div>
     </NavBar>
   );
