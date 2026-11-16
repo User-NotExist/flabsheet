@@ -661,3 +661,50 @@ export async function getQueueCount(): Promise<number> {
 export function submissionStreamUrl(id: number): string {
   return `${API_URL}/submissions/${id}/stream`;
 }
+
+// --- Staff: every submission (/manage/submissions) --------------------------
+
+export type AdminSubmissionItem = SubmissionListItem & {
+  student: { id: number; login_id: string; display_name: string };
+  problem: { id: number; slug: string; title: string };
+};
+
+export type AdminSubmissionPage = {
+  items: AdminSubmissionItem[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type SubmissionFilters = {
+  student?: string; // login id, exact
+  problem?: string; // slug
+  verdict?: string; // AC, WA, ...
+  date_from?: string; // ISO time, inclusive
+  date_to?: string; // ISO time, exclusive
+};
+
+/** Query string shared by the list and the CSV export, so both return the same rows. */
+function submissionFilterQuery(filters: SubmissionFilters): URLSearchParams {
+  const params = new URLSearchParams({ include_staff: "true" });
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) params.set(key, value);
+  }
+  return params;
+}
+
+export async function listAllSubmissions(
+  filters: SubmissionFilters,
+  page: number,
+  pageSize: number,
+): Promise<AdminSubmissionPage> {
+  const params = submissionFilterQuery(filters);
+  params.set("page", String(page));
+  params.set("page_size", String(pageSize));
+  return (await request(`/admin/submissions?${params}`)).json();
+}
+
+/** Download link for the raw submissions CSV with the same filters. */
+export function submissionsCsvUrl(filters: SubmissionFilters): string {
+  return `${API_URL}/admin/export/submissions.csv?${submissionFilterQuery(filters)}`;
+}
