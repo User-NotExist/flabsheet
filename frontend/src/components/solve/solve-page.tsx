@@ -100,6 +100,8 @@ function listItem(submission: Submission): SubmissionListItem {
     score_milli: submission.score_milli,
     max_points: submission.max_points,
     is_staff: submission.is_staff,
+    // Only used for a submission the user just made or is watching finish
+    rejudge: false,
     created_at: submission.created_at,
   };
 }
@@ -226,8 +228,11 @@ export function SolvePage() {
   const showWhitespace = whitespace ?? problem.checker_strict;
   const sourceBytes = encoder.encode(source).length;
   const closed = settings !== null && !settings.submissions_open;
+  // A staff rejudge does not count against the limit, as on the backend
   const active = history.filter(
-    (item) => item.status === "queued" || item.status === "compiling" || item.status === "running",
+    (item) =>
+      !item.rejudge &&
+      (item.status === "queued" || item.status === "compiling" || item.status === "running"),
   ).length;
   const full =
     problem.score_milli !== null && problem.score_milli >= problem.max_points * 1000;

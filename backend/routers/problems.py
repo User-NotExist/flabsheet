@@ -12,7 +12,11 @@ current version until that build succeeds (FR-PRB-03, FR-PRB-12).
 are uploaded beforehand (``POST .../testdata``) and named by SHA-256, because
 they can be 8 MiB each.
 
-Not here yet: rejudge (FR-PRB-16), which needs the submission pipeline.
+``POST /admin/problems/{id}/rejudge`` judges the problem's submissions again
+on its current version (FR-PRB-16): by default only the ones that decide a
+student's score, or all of them with ``{"scope": "all"}``. It runs in the
+request: the rows and their jobs change in one transaction
+(``services/submissions.py``).
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ import hashlib
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
@@ -50,7 +54,9 @@ from services.auth import CurrentSession, require_role
 from services.jobs import enqueue
 from services.languages import LANGUAGES
 from services.operation_log import log_operation
+from services.judge import send_outbox_rows
 from services.packages import testdata_key
+from services.submissions import rejudge_problem, score_deciding_ids
 
 router = APIRouter(
     prefix="/admin",
@@ -185,10 +191,26 @@ class ProblemDetail(BaseModel):
     # Number of the version students are judged against, if any
     current_version: Optional[int]
     student_submission_count: int
+    # What a rejudge judges again: every submission, staff tests included,
+    # or only those that decide a student's score (scope "all" / "latest")
+    submission_count: int
+    latest_submission_count: int
     updated_at: datetime
     # The newest version, which is what the editor edits; it is not the
     # current one while its build is pending or failed
     version: Optional[VersionOut]
+
+
+class RejudgeIn(BaseModel):
+    # "latest": each student's latest submission and the one holding their
+    # score; "all": every submission of the problem
+    scope: Literal["latest", "all"] = "latest"
+
+
+class RejudgeOut(BaseModel):
+    rejudged: int
+    # Left as they were: the current version does not allow their language
+    skipped: int
 
 
 class BuildState(BaseModel):
@@ -342,6 +364,10 @@ def _detail(db: DbSession, problem: Problem) -> ProblemDetail:
         can_enable=_can_enable(problem),
         current_version=current.version if current else None,
         student_submission_count=_student_submission_count(db, problem.id),
+        submission_count=db.scalar(
+            select(func.count()).select_from(Submission).where(Submission.problem_id == problem.id)
+        ) or 0,
+        latest_submission_count=len(score_deciding_ids(db, problem.id)),
         updated_at=problem.updated_at,
         version=_version_out(latest) if latest else None,
     )
@@ -721,6 +747,40 @@ def rebuild_problem(problem_id: int, session: CurrentSession, db: Db):
     db.commit()
     enqueue("start_build", version.id)
     return _detail(db, problem)
+
+
+@router.post("/problems/{problem_id}/rejudge", response_model=RejudgeOut)
+def rejudge_submissions(
+    problem_id: int, session: CurrentSession, db: Db, body: Optional[RejudgeIn] = None
+):
+    """Judge the problem's submissions again on its current version.
+
+    Allowed for an archived problem and while the killswitch is on
+    (FR-ADM-05). The confirmation for a large rejudge (SRS 6.6) is the UI's.
+    """
+    # Locked so the current version cannot move while the jobs are written
+    problem = _get_problem(db, problem_id, lock=True)
+    version = problem.current_version
+    if version is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This problem has no successful build to judge against"
+        )
+    scope = body.scope if body else "latest"
+    row_ids, skipped = rejudge_problem(db, problem, version, latest_only=scope == "latest")
+    log_operation(
+        db, "problem.rejudge", user_id=session.user_id,
+        info={
+            "problem_id": problem.id,
+            "version": version.version,
+            "scope": scope,
+            "rejudged": len(row_ids),
+            "skipped": skipped,
+        },
+    )
+    db.commit()
+    # If Redis is down the submissions stay queued and flush_outbox retries
+    send_outbox_rows(db, row_ids)
+    return RejudgeOut(rejudged=len(row_ids), skipped=skipped)
 
 
 @router.post("/problems/{problem_id}/testdata", response_model=TestDataOut)

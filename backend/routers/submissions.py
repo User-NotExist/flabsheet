@@ -63,6 +63,7 @@ from services.session import SessionData, get_session
 from services.submissions import (
     ACTIVE_STATUSES,
     FINAL_STATUSES,
+    REJUDGE_LANE,
     channel,
     create_submission,
     progress,
@@ -105,6 +106,8 @@ class SubmissionListItem(BaseModel):
     score_milli: Optional[int]
     max_points: int
     is_staff: bool
+    # Being judged again by staff: not counted against the submit limit
+    rejudge: bool
     created_at: datetime
 
 
@@ -381,7 +384,12 @@ def submit(slug: str, body: SubmitIn, session: CurrentSession, db: Db):
     active = db.scalar(
         select(func.count())
         .select_from(Submission)
-        .where(Submission.user_id == session.user_id, Submission.status.in_(ACTIVE_STATUSES))
+        .where(
+            Submission.user_id == session.user_id,
+            Submission.status.in_(ACTIVE_STATUSES),
+            # A staff rejudge is not the student's doing and must not lock them out
+            Submission.lane != REJUDGE_LANE,
+        )
     )
     if (active or 0) >= MAX_ACTIVE_SUBMISSIONS:
         raise ApiError(
@@ -426,6 +434,7 @@ def list_submissions(session: CurrentSession, db: Db, problem: Optional[str] = N
             score_milli=submission.score_milli,
             max_points=max_points,
             is_staff=submission.is_staff,
+            rejudge=submission.lane == REJUDGE_LANE,
             created_at=submission.created_at,
         )
         for submission, max_points in db.execute(query)

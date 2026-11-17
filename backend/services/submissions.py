@@ -15,6 +15,16 @@ browser. The snapshot never carries test data, only counts and the verdict.
     ...
     outcome = apply_event(db, event)        # in /internal/judge-events
     if outcome is Outcome.superseded: ...   # answer 409
+
+Staff can send a submission to the judge again (:func:`rejudge`,
+:func:`requeue`, :func:`rejudge_problem`). The submission keeps its row and
+source, moves to the problem's current version, and gets a new ``job_id`` and
+the next ``attempt``, so events of the job it replaces answer 409. Its old
+score stays current until the new result arrives (FR-JDG-06).
+
+    row = rejudge(db, submission, version)       # caller logs and commits
+    db.commit()
+    send_outbox(db, row)
 """
 
 from __future__ import annotations
@@ -36,6 +46,7 @@ from db.models.problem import Problem, ProblemVersion, TestCase, TestCaseVisibil
 from db.models.submission import (
     JudgeEvent,
     JudgeOutbox,
+    ProblemScore,
     Submission,
     SubmissionResult,
     SubmissionStatus,
@@ -49,6 +60,7 @@ from services.packages import language_time_limits
 logger = logging.getLogger(__name__)
 
 LANE = "practice"  # every student and staff submission (SRS 6.6)
+REJUDGE_LANE = "rejudge"  # staff rejudges: served before practice (SRS 6.6)
 # Verdicts the judge documents. Anything else is stored as it came and flagged.
 KNOWN_VERDICTS = frozenset(
     {"AC", "PA", "WA", "PE", "TLE", "MLE", "OLE", "RE", "CE", "SE", "JE"}
@@ -83,14 +95,28 @@ _UPSERT_SCORE = text(
 )
 
 
+# The same rule read from scratch, for when a rejudge takes the scoring result
+# away from the submission that held the score.
+_LATEST_SCORING = text(
+    """
+    SELECT id, created_at, score_milli FROM submissions
+    WHERE user_id = :user_id AND problem_id = :problem_id
+      AND NOT is_staff AND status = 'done' AND NOT verdict_unknown
+      AND verdict NOT IN ('SE', 'JE') AND score_milli IS NOT NULL
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+    """
+)
+
+
 class Outcome(enum.Enum):
     applied = "applied"
     ignored = "ignored"  # duplicate, or the submission no longer exists
     superseded = "superseded"  # a newer attempt or job owns the submission
 
 
-def stream_name() -> str:
-    return f"judge:{LANE}:{settings.judge_course_id}"
+def stream_name(lane: str = LANE) -> str:
+    return f"judge:{lane}:{settings.judge_course_id}"
 
 
 def channel(submission_id: int) -> str:
@@ -195,6 +221,100 @@ def create_submission(
     # If Redis is down the submission stays queued and flush_outbox retries
     send_outbox(db, row)
     return submission
+
+
+# --- judging again ----------------------------------------------------------
+
+
+def can_judge(submission: Submission, version: ProblemVersion) -> bool:
+    """False when the version no longer allows the submission's language."""
+    return submission.language_id in LANGUAGES and any(
+        lang.language_id == submission.language_id for lang in version.languages
+    )
+
+
+def _new_job(
+    db: Session, submission: Submission, version: ProblemVersion, lane: str
+) -> JudgeOutbox:
+    """Give a locked submission a new job on ``version``. The caller commits and sends.
+
+    The old outbox row is left alone: ``job_id`` is unique there, and if it
+    was never sent ``flush_outbox`` drops it because the job is gone.
+    """
+    _reset_for_new_attempt(db, submission, submission.attempt + 1)
+    submission.problem_version_id = version.id
+    submission.job_id = new_job_id()
+    submission.lane = lane
+    submission.status = SubmissionStatus.queued
+    submission.started_at = None
+    row = JudgeOutbox(
+        job_id=submission.job_id,
+        stream=stream_name(lane),
+        payload=judge_job_payload(db, submission),
+    )
+    db.add(row)
+    return row
+
+
+def rejudge(db: Session, submission: Submission, version: ProblemVersion) -> JudgeOutbox:
+    """Judge a locked submission again on ``version``, in the rejudge lane."""
+    return _new_job(db, submission, version, REJUDGE_LANE)
+
+
+def requeue(db: Session, submission: Submission, version: ProblemVersion) -> JudgeOutbox:
+    """Send a delayed submission again (FR-JDG-05). It keeps its lane, so a
+    student's own waiting submission is not pushed ahead of the others."""
+    return _new_job(db, submission, version, submission.lane)
+
+
+def score_deciding_ids(db: Session, problem_id: int) -> set[int]:
+    """The submissions that decide the students' scores on a problem.
+
+    Each student's latest submission, plus the one that holds their current
+    score when that is an older one (the latest ended in SE or JE, or is still
+    being judged). Staff test submissions never score, so none is included.
+    """
+    latest = select(func.max(Submission.id)).where(
+        Submission.problem_id == problem_id, Submission.is_staff.is_(False)
+    ).group_by(Submission.user_id)  # ids rise with submit time
+    holders = select(ProblemScore.submission_id).where(ProblemScore.problem_id == problem_id)
+    return set(db.scalars(latest)) | set(db.scalars(holders))
+
+
+def rejudge_problem(
+    db: Session, problem: Problem, version: ProblemVersion, *, latest_only: bool
+) -> tuple[list[int], int]:
+    """Rejudge the problem's submissions on ``version`` (FR-PRB-16).
+
+    With ``latest_only`` only the submissions of :func:`score_deciding_ids`
+    are judged again: enough to put every score on the version, with far
+    fewer jobs. The others keep the result of the version they were judged on.
+
+    Returns the outbox row ids in sending order and how many submissions were
+    skipped: one whose language the version no longer allows keeps its old
+    result. All rows change in the caller's transaction, so a rejudge is all
+    or nothing; the caller commits, then sends with ``send_outbox_rows``, and
+    ``flush_outbox`` retries what Redis refused.
+    """
+    # Locked in id order so two rejudges of one problem cannot deadlock;
+    # apply_event locks one row at a time.
+    submissions = db.scalars(
+        select(Submission)
+        .where(Submission.problem_id == problem.id)
+        .order_by(Submission.id)
+        .with_for_update()
+    ).all()
+    # Read after the lock, so no result can move a score in between
+    deciding = score_deciding_ids(db, problem.id)
+    wanted = [s for s in submissions if s.id in deciding] if latest_only else submissions
+    judged = [s for s in wanted if can_judge(s, version)]
+    # The submissions that set a score go first (FR-JDG-06), so scores are
+    # right long before the queue is empty.
+    judged.sort(key=lambda s: (s.id not in deciding, -s.id))
+    # Outbox ids follow this order, which is also the order they are sent in
+    rows = [rejudge(db, submission, version) for submission in judged]
+    db.flush()
+    return [row.id for row in rows], len(wanted) - len(judged)
 
 
 # --- live progress ----------------------------------------------------------
@@ -305,7 +425,9 @@ def _finish(db: Session, submission: Submission, payload: Mapping[str, Any]) -> 
     )
     # Staff test submissions are judged but never ranked (FR-PRB-14), so they
     # get no row in the table the leaderboard and exports read.
-    if scoring and not submission.is_staff:
+    if submission.is_staff:
+        return
+    if scoring:
         db.execute(
             _UPSERT_SCORE,
             {
@@ -315,6 +437,34 @@ def _finish(db: Session, submission: Submission, payload: Mapping[str, Any]) -> 
                 "created_at": submission.created_at,
                 "score_milli": submission.score_milli,
             },
+        )
+    elif submission.attempt > 1:
+        _drop_score(db, submission)
+
+
+def _drop_score(db: Session, submission: Submission) -> None:
+    """A judged-again submission ended without a score: if it held its
+    author's current score, the latest submission that has one takes over."""
+    key = {"user_id": submission.user_id, "problem_id": submission.problem_id}
+    removed = db.execute(
+        delete(ProblemScore)
+        .where(
+            ProblemScore.user_id == submission.user_id,
+            ProblemScore.problem_id == submission.problem_id,
+            ProblemScore.submission_id == submission.id,
+        )
+        .returning(ProblemScore.submission_id)
+    ).first()
+    if removed is None:
+        return
+    # The submission's own columns are flushed first so the query sees them
+    db.flush()
+    best = db.execute(_LATEST_SCORING, key).first()
+    if best is not None:
+        db.execute(
+            _UPSERT_SCORE,
+            {**key, "submission_id": best.id, "created_at": best.created_at,
+             "score_milli": best.score_milli},
         )
 
 
@@ -398,9 +548,20 @@ def detect_delayed(db: Session) -> int:
     The job stays in the queue: a late result still finishes the submission.
     """
     cutoff = datetime.now(timezone.utc) - DELAYED_AFTER
+    # The clock starts when the current job was queued, not at submit time:
+    # a rejudged or requeued submission is old but its job is new.
+    job_is_old = (
+        select(JudgeOutbox.id)
+        .where(JudgeOutbox.job_id == Submission.job_id, JudgeOutbox.created_at < cutoff)
+        .exists()
+    )
     ids = db.scalars(
         update(Submission)
-        .where(Submission.status.in_(ACTIVE_STATUSES), Submission.created_at < cutoff)
+        .where(
+            Submission.status.in_(ACTIVE_STATUSES),
+            Submission.created_at < cutoff,  # served by submissions_stale_idx
+            job_is_old,
+        )
         .values(status=SubmissionStatus.delayed)
         .returning(Submission.id)
     ).all()

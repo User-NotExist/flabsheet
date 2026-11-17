@@ -16,6 +16,8 @@ import {
   getSession,
   getSubmission,
   isFinalStatus,
+  rejudgeSubmission,
+  requeueSubmission,
   type Submission,
   type SubmissionProgress,
 } from "@/lib/api";
@@ -66,10 +68,14 @@ export function SubmissionView() {
   const [error, setError] = useState<string | null>(null);
   // null = follow the problem's checking mode
   const [whitespace, setWhitespace] = useState<boolean | null>(null);
+  const [sending, setSending] = useState(false);
 
   // The router keeps this page mounted (hidden) after navigating away
   useLayoutEffect(() => {
-    return () => setError(null);
+    return () => {
+      setError(null);
+      setSending(false);
+    };
   }, []);
 
   const load = useCallback(
@@ -119,6 +125,29 @@ export function SubmissionView() {
   const showWhitespace = whitespace ?? submission.checker_strict;
   const notice = resultNotice(submission);
 
+  /** Staff: rejudge a finished submission, or requeue a delayed one. */
+  async function judgeAgain() {
+    if (!submission) return;
+    setSending(true);
+    setError(null);
+    try {
+      const again =
+        submission.status === "delayed"
+          ? await requeueSubmission(submission.id)
+          : await rejudgeSubmission(submission.id);
+      // The last run's progress would otherwise show as this run's
+      setProgress(null);
+      setSubmission({ ...submission, status: again.status, attempt: again.attempt, results: [] });
+      load();
+    } catch (err) {
+      setError(toMessage(err));
+    } finally {
+      setSending(false);
+    }
+  }
+  const canRequeue = staffView && submission.status === "delayed";
+  const canRejudge = staffView && !judging;
+
   async function loadIntoEditor() {
     if (!submission) return;
     try {
@@ -159,13 +188,25 @@ export function SubmissionView() {
           )}
         </div>
         {judging ? (
-          <LiveStatus status={status} testsDone={testsDone} testsTotal={submission.tests_total} />
+          <div className="flex flex-wrap items-center gap-4">
+            <LiveStatus status={status} testsDone={testsDone} testsTotal={submission.tests_total} />
+            {canRequeue && (
+              <Button type="button" variant="outline" disabled={sending} onClick={judgeAgain}>
+                {sending ? "Requeueing…" : "Requeue"}
+              </Button>
+            )}
+          </div>
         ) : (
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             {submission.verdict && <VerdictBadge verdict={submission.verdict} long />}
             <span className="text-2xl font-semibold tabular-nums">
               {formatScore(submission.score_milli, submission.max_points)}
             </span>
+            {canRejudge && (
+              <Button type="button" variant="outline" disabled={sending} onClick={judgeAgain}>
+                {sending ? "Rejudging…" : "Rejudge"}
+              </Button>
+            )}
           </div>
         )}
       </section>
