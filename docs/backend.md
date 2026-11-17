@@ -106,7 +106,13 @@ The judge contract is fixed by judge-worker-go; these rules keep the backend cor
 
 **Refresh (`POST /internal/judge-jobs/{job_id}/refresh`)** returns the job rebuilt with fresh URLs and the current attempt, or `404` if the submission is gone or `job_id` is no longer its current job (it was rejudged).
 
-**Rejudge** gives the submission a new ULID `job_id` and the next `attempt`, then enqueues through the outbox like a submit. `job_id` is unique in `submissions` and `judge_outbox`, so it cannot be reused.
+**Rejudge** gives the submission a new ULID `job_id` and the next `attempt`, moves it to the problem's current version, then enqueues through the outbox like a submit. `job_id` is unique in `submissions` and `judge_outbox`, so it cannot be reused. There are three entry points, none stopped by the killswitch:
+
+- `POST /admin/submissions/{id}/rejudge`: a finished submission (`done` or `review`), on the `rejudge` lane. This is how a JE is resolved (FR-MON-06).
+- `POST /admin/submissions/{id}/requeue`: a `delayed` submission, on the lane it was in (FR-JDG-05).
+- `POST /admin/problems/{id}/rejudge` with `{"scope": "latest" | "all"}` (FR-PRB-16). `latest`, the default, rejudges only the submissions that decide a score: each student's latest, plus the one holding their current score when that is an older one; the rest keep the results of the version they were judged on. `all` rejudges every submission, staff tests included, score-deciding ones first. It runs in the request, not as a background job: all rows and their outbox rows change in one transaction, and the jobs are pushed after the commit (`flush_outbox` retries what Redis refused). A submission whose language the current version no longer allows is skipped and counted in the response. The UI warns over 200 (SRS 6.6).
+
+A submission keeps its old score while it waits. When its new result has no score (SE, JE) and it held the student's current score, the score falls back to their latest submission that has one, or is removed. Submissions on the `rejudge` lane do not count toward the student's limit of 3 being judged.
 
 ## Background jobs
 
@@ -118,8 +124,7 @@ The worker process runs these; each is safe to run twice.
 | `start_build` | Saving a new version | Builds and uploads the staging zip, writes the outbox row and sends the build job. Fails the version as `superseded` if a newer one exists |
 | `assemble_package` | `build_done ok` | Verifies each answer's SHA-256, builds and uploads the final package zip, marks the version `ok` and makes it current |
 | `resume_builds` | Every 5 s | Runs `start_build` and `assemble_package` for versions whose enqueued job was lost or failed |
-| `detect_delayed` | Every minute | Marks submissions with no `done` after 15 min as `delayed` (FR-JDG-05). The job stays queued, so a late result still finishes the submission |
-| `rejudge_problem` | Staff action | Enqueues every submission of the problem, each student's latest first so scores update soonest, on the `rejudge` lane with a new `job_id` and attempt; warns over 200 (SRS 6.6) |
+| `detect_delayed` | Every minute | Marks submissions with no `done` 15 min after their current job was queued as `delayed` (FR-JDG-05; the outbox row's time, so a rejudged submission is not flagged at once). The job stays queued, so a late result still finishes the submission |
 | `refresh_leaderboard` | After `done`, debounced 5 s | Rebuilds the cached leaderboard |
 | `cleanup_streams` | Every hour | Removes empty judge streams from `judge:streams:{lane}` after 1 h idle |
 | `sweep_orphans` | Weekly | Deletes storage objects older than 24 h that no database row references ([data-and-storage.md](data-and-storage.md)) |

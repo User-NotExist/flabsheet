@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 
 import { FormError } from "@/components/auth/form-error";
 import { createDataColumnHelper, DataTable } from "@/components/data-table/data-table";
@@ -24,6 +24,8 @@ import {
   listAllSubmissions,
   listProblems,
   type ProblemListItem,
+  rejudgeSubmission,
+  requeueSubmission,
   type SubmissionFilters,
   type SubmissionStatus,
   submissionsCsvUrl,
@@ -54,7 +56,7 @@ function endOfDay(date: string): string {
 const helper = createDataColumnHelper<AdminSubmissionItem>();
 
 // Module scope: a new column list on every render would rebuild the row models
-const columns = helper.columns([
+const dataColumns = helper.columns([
   helper.accessor("id", {
     header: "ID",
     sortFn: "basic",
@@ -127,6 +129,55 @@ export function SubmissionBrowser() {
   const [result, setResult] = useState<AdminSubmissionPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  // Id of the submission whose Rejudge or Requeue request is in flight
+  const [sending, setSending] = useState<number | null>(null);
+
+  // The router keeps this page mounted (hidden) after navigating away
+  useLayoutEffect(() => {
+    return () => setSending(null);
+  }, []);
+
+  const columns = useMemo(() => {
+    async function judgeAgain(item: AdminSubmissionItem) {
+      setSending(item.id);
+      try {
+        await (item.status === "delayed" ? requeueSubmission : rejudgeSubmission)(item.id);
+        setError(null);
+        setRevision((r) => r + 1);
+      } catch (err) {
+        setError(toMessage(err));
+      } finally {
+        setSending(null);
+      }
+    }
+    return [
+      ...dataColumns,
+      // Only the rows that wait for staff: a judge error (FR-MON-06) and a
+      // delayed job (FR-JDG-05). Any other one is rejudged from its own page.
+      helper.display({
+        id: "action",
+        header: "Action",
+        cell: ({ row: { original: s } }) =>
+          s.status === "review" || s.status === "delayed" ? (
+            <Button
+              variant="link"
+              size="sm"
+              className="h-auto p-0"
+              disabled={sending !== null}
+              onClick={() => judgeAgain(s)}
+            >
+              {s.status === "delayed"
+                ? sending === s.id
+                  ? "Requeueing…"
+                  : "Requeue"
+                : sending === s.id
+                  ? "Rejudging…"
+                  : "Rejudge"}
+            </Button>
+          ) : null,
+      }),
+    ];
+  }, [sending, toMessage]);
 
   // Problem names for the filter; the list still works without them
   useEffect(() => {

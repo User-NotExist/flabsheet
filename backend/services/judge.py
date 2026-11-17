@@ -72,6 +72,44 @@ def send_outbox(db: Session, row: JudgeOutbox) -> bool:
     return True
 
 
+def send_outbox_rows(db: Session, row_ids: list[int]) -> int:
+    """Push many committed outbox rows, in the order given. Commits per batch.
+
+    For a whole-problem rejudge, where one commit per job would be slow. Rows
+    are locked while they are pushed so ``flush_outbox`` cannot send one a
+    second time; whatever fails here is left for it to retry.
+    """
+    sent = 0
+    for start in range(0, len(row_ids), OUTBOX_BATCH):
+        batch = row_ids[start : start + OUTBOX_BATCH]
+        found = {
+            row.id: row
+            for row in db.scalars(
+                select(JudgeOutbox)
+                .where(JudgeOutbox.id.in_(batch), JudgeOutbox.sent_at.is_(None))
+                .with_for_update(skip_locked=True)
+            )
+        }
+        for row_id in batch:
+            row = found.get(row_id)
+            if row is None:
+                continue
+            try:
+                _push(row.stream, row.payload)
+            except redis.RedisError as exc:
+                logger.warning("judge job %s not sent; flush_outbox will retry", row.job_id, exc_info=True)
+                row.tries += 1
+                row.last_error = str(exc)[:500]
+                db.commit()
+                return sent
+            row.tries += 1
+            row.sent_at = datetime.now(timezone.utc)
+            row.last_error = None
+            sent += 1
+        db.commit()
+    return sent
+
+
 def flush_outbox(db: Session) -> int:
     """Re-send outbox rows that were committed but never reached Redis."""
     # Imported here: both build job payloads and themselves import this module
@@ -82,7 +120,8 @@ def flush_outbox(db: Session) -> int:
     rows = db.scalars(
         select(JudgeOutbox)
         .where(JudgeOutbox.sent_at.is_(None), JudgeOutbox.created_at < cutoff)
-        .order_by(JudgeOutbox.created_at)
+        # The id breaks ties: the rows of one rejudge share a created_at
+        .order_by(JudgeOutbox.created_at, JudgeOutbox.id)
         .limit(OUTBOX_BATCH)
         .with_for_update(skip_locked=True)
     ).all()
