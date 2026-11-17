@@ -4,11 +4,16 @@ Failed logins
 -------------
 
 Only failures count, and they are counted twice: once per login id and once
-per client IP. When either counter reaches ``login_rate_limit_attempts`` within
+per client IP. When the login id counter reaches ``login_rate_limit_attempts``
+or the IP counter reaches ``login_rate_limit_ip_attempts`` within
 ``login_rate_limit_window_seconds``, further attempts are rejected until that
 window expires. Two separate counters are needed because a single
 (login id, IP) counter is bypassed by guessing one account from many IPs, or
 many accounts from one IP.
+
+The IP limit is much higher than the login id limit: a whole classroom behind
+one NAT shares the IP counter, and it only has to slow down guessing across
+many accounts, while each account keeps its own strict limit.
 
 A successful login clears only the login id counter. The IP counter is left to
 expire, otherwise an attacker could reset it by signing in to an account of
@@ -63,9 +68,11 @@ def login_retry_after(login_id: str, client_ip: str) -> int:
         logger.warning("login rate limit check failed; allowing attempt", exc_info=True)
         return 0
 
+    # Same order as _keys(): login id, then IP
+    limits = (settings.login_rate_limit_attempts, settings.login_rate_limit_ip_attempts)
     retry_after = 0
-    for count, ttl in zip(results[0::2], results[1::2]):
-        if count is not None and int(count) >= settings.login_rate_limit_attempts:
+    for count, ttl, limit in zip(results[0::2], results[1::2], limits):
+        if count is not None and int(count) >= limit:
             # Wait for the longer window when both counters are over the limit
             retry_after = max(retry_after, ttl, 1)
     return retry_after

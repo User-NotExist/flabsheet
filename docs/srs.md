@@ -134,7 +134,7 @@ Every requirement below is MUST unless marked otherwise. "Acceptance" lines stat
 | FR-AUTH-05 | Users can log out, which revokes the session server-side. | Reusing the old cookie after logout gets `401`. |
 | FR-AUTH-06 | Users can change their own password (current password required, except while the account is flagged `must_change_password`). Their other sessions are signed out. | Old password stops working immediately. |
 | FR-AUTH-07 | Accounts flagged `must_change_password` are forced to set a new password on first login, without entering the issued one again. | Generated student passwords trigger the prompt. |
-| FR-AUTH-08 | Failed login attempts are counted per account and, separately, per client IP (default 10 failures / 15 min each). When either count is reached, further attempts are refused until its window ends. A successful login clears the account's count only. | After 10 failures the next attempt is refused with `429` (code `rate_limited`), also from another IP for the same account, and for another account from the same IP. |
+| FR-AUTH-08 | Failed login attempts are counted per account and, separately, per client IP (default 10 failures / 15 min per account and 300 failures / 15 min per IP; the IP limit is higher because a classroom behind one address shares it). When either count is reached, further attempts are refused until its window ends. A successful login clears the account's count only. | After 10 failures on one account the next attempt is refused with `429` (code `rate_limited`), also from another IP. After 300 failures from one IP the next attempt is refused the same way, also for another account. |
 | FR-AUTH-09 | Staff and admin can reset a student's password; admin can reset a staff password. The new password is shown once. | Reset password works; previous sessions are revoked. |
 | FR-AUTH-10 | The first admin account is created by a CLI/seed command at install, never through the web UI. | Fresh install has no web path to create an admin. |
 
@@ -431,7 +431,7 @@ None remain; every question is settled in 8.3.
 | Per-test-case weights | Equal weight is enough for MVP | FR-JDG-04 |
 | Languages at launch | Only C++20 (cpp20-gcc13) and Python 3.12 (py312) | 2.4 |
 | Session lifetime | 7 days from login, no idle timeout | FR-AUTH-04 |
-| Login rate limit | Separate counts per account and per IP, 10 failures / 15 min | FR-AUTH-08 |
+| Login rate limit | Separate counts per account (10 failures / 15 min) and per IP (300 failures / 15 min) | FR-AUTH-08 |
 | Role changes | None in the web UI; only the install CLI can make an admin | 2.1, FR-ADM-04 |
 | Staff view of hidden-case output | Not available; the judge never sends it | FR-MON-02 |
 | PE message on hidden cases | Not shown | FR-STD-08, 6.1, 6.4 |
