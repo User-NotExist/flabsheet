@@ -43,7 +43,10 @@ import {
   getBuildState,
   getProblem,
   listLanguages,
+  LARGE_REJUDGE,
   rebuildProblem,
+  rejudgeProblem,
+  type RejudgeScope,
   setProblemState,
   updateProblem,
   uploadImage,
@@ -51,11 +54,12 @@ import {
   type Language,
   type ProblemDetail,
 } from "@/lib/api";
+import { notifyError, notifySuccess } from "@/lib/notify";
 import { useApiError } from "@/lib/use-api-error";
 
 const BUILD_POLL_MS = 2000;
 
-type Action = "save" | "rebuild" | "toggle" | "remove";
+type Action = "save" | "rebuild" | "toggle" | "remove" | "rejudge";
 
 function EditorShell({ children }: { children: React.ReactNode }) {
   return (
@@ -99,16 +103,16 @@ export function ProblemEditor() {
   const [form, setForm] = useState<EditorForm | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [action, setAction] = useState<Action | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [rejudgeOpen, setRejudgeOpen] = useState(false);
+  const [rejudgeScope, setRejudgeScope] = useState<RejudgeScope>("latest");
 
   // The router keeps this page mounted (hidden) after navigating away
   useLayoutEffect(() => {
     return () => {
       setAction(null);
       setError(null);
-      setNotice(null);
       setConfirmOpen(false);
     };
   }, []);
@@ -148,7 +152,13 @@ export function ProblemEditor() {
         if (cancelled) return;
         if (state.build?.status === "pending" && state.version === pendingVersion) return;
         const detail = await getProblem(id);
-        if (!cancelled) setServer(detail);
+        if (cancelled) return;
+        setServer(detail);
+        const built = detail.version?.build.status;
+        if (built === "ok") notifySuccess(`Version ${detail.version!.version} built.`);
+        else if (built === "failed") {
+          notifyError(`The build of version ${detail.version!.version} failed.`);
+        }
       } catch {
         // A missed poll is retried by the next tick
       }
@@ -215,15 +225,19 @@ export function ProblemEditor() {
   );
   const canDelete = server.student_submission_count === 0;
 
-  /** Runs one server action with the shared pending and error handling. */
+  /**
+   * Runs one server action with the shared pending and error handling. A
+   * failed save stays on the page next to the form, like its validation
+   * errors; any other action reports in a toast.
+   */
   async function run(name: Action, work: () => Promise<void>) {
     setAction(name);
     setError(null);
-    setNotice(null);
     try {
       await work();
     } catch (err) {
-      setError(toMessage(err));
+      if (name === "save") setError(toMessage(err));
+      else notifyError(toMessage(err));
     } finally {
       setAction(null);
     }
@@ -255,7 +269,7 @@ export function ProblemEditor() {
       setServer(detail);
       if (parsed) {
         setForm(formFromDetail(detail, languages));
-        setNotice(
+        notifySuccess(
           detail.version && detail.version.version > previousVersion
             ? `Saved. Version ${detail.version.version} is building.`
             : "Saved.",
@@ -268,7 +282,7 @@ export function ProblemEditor() {
           slug: detail.slug,
           statement: detail.statement_md,
         });
-        setNotice(
+        notifySuccess(
           "Saved the title and statement. Settings, reference solution and tests are saved together once there is a reference solution and at least one test.",
         );
       }
@@ -280,12 +294,36 @@ export function ProblemEditor() {
       if (canDelete) {
         await deleteProblem(id);
         router.replace("/manage/problems");
+        notifySuccess("Problem deleted.");
       } else {
         setServer(await setProblemState(id, "archive"));
         setConfirmOpen(false);
+        notifySuccess("Problem archived.");
       }
     });
   }
+
+  function rejudge() {
+    run("rejudge", async () => {
+      try {
+        const { rejudged, skipped } = await rejudgeProblem(id, rejudgeScope);
+        setServer(await getProblem(id));
+        notifySuccess(
+          `Rejudging ${rejudged} submission${rejudged === 1 ? "" : "s"} on version ${server!.current_version}.` +
+            (skipped > 0
+              ? ` ${skipped} kept ${skipped === 1 ? "its" : "their"} old result: this version does not allow ${skipped === 1 ? "its" : "their"} language.`
+              : ""),
+        );
+      } finally {
+        setRejudgeOpen(false);
+      }
+    });
+  }
+  const submissionCount = server.submission_count;
+  const rejudgeCount =
+    rejudgeScope === "latest" ? server.latest_submission_count : submissionCount;
+  const buildWaiting =
+    server.version !== null && server.version.version !== server.current_version;
 
   return (
     <EditorShell>
@@ -327,12 +365,7 @@ export function ProblemEditor() {
         </p>
       )}
       <FormError message={error} />
-      {notice && (
-        <p role="status" className="text-sm text-muted-foreground">
-          {notice}
-        </p>
-      )}
-      {dirty && !notice && !error && (
+      {dirty && !error && (
         <p className="text-sm text-muted-foreground">You have unsaved changes.</p>
       )}
 
@@ -572,6 +605,7 @@ export function ProblemEditor() {
             onRebuild={() =>
               run("rebuild", async () => {
                 setServer(await rebuildProblem(id));
+                notifySuccess("Rebuild started.");
               })
             }
           />
@@ -590,6 +624,11 @@ export function ProblemEditor() {
                 onCheckedChange={(checked) =>
                   run("toggle", async () => {
                     setServer(await setProblemState(id, checked ? "enable" : "disable"));
+                    notifySuccess(
+                      checked
+                        ? "The problem is now visible to students."
+                        : "The problem is now hidden from students.",
+                    );
                   })
                 }
               />
@@ -614,6 +653,22 @@ export function ProblemEditor() {
               <h2 className="text-base font-semibold">Maintenance</h2>
               <Button
                 type="button"
+                variant="outline"
+                disabled={busy || submissionCount === 0 || server.current_version === null}
+                onClick={() => {
+                  setRejudgeScope("latest");
+                  setRejudgeOpen(true);
+                }}
+              >
+                Rejudge submissions…
+              </Button>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                {submissionCount === 0
+                  ? "There are no submissions to rejudge yet."
+                  : "Judges submissions again on the current version. Scores follow the new results."}
+              </p>
+              <Button
+                type="button"
                 variant="destructive"
                 disabled={busy}
                 onClick={() => setConfirmOpen(true)}
@@ -629,6 +684,72 @@ export function ProblemEditor() {
           )}
         </aside>
       </div>
+
+      <Dialog open={rejudgeOpen} onOpenChange={setRejudgeOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rejudge submissions of “{server.title}”?</DialogTitle>
+            <DialogDescription>
+              They are judged again on version {server.current_version}. Each one keeps its
+              old score until its new result arrives.
+              {buildWaiting &&
+                ` Version ${server.version!.version} has no successful build, so it is not used.`}
+            </DialogDescription>
+          </DialogHeader>
+          <fieldset className="flex flex-col gap-3 text-sm">
+            <legend className="sr-only">Which submissions to rejudge</legend>
+            <label className="flex items-start gap-2.5">
+              <input
+                type="radio"
+                name="rejudge-scope"
+                className="mt-1 accent-primary"
+                checked={rejudgeScope === "latest"}
+                onChange={() => setRejudgeScope("latest")}
+              />
+              <span>
+                Latest submission of each student ({server.latest_submission_count})
+                <span className="block text-muted-foreground">
+                  Enough to update every score. Includes the submission that holds a
+                  student&apos;s score when it is not their latest. Older submissions keep the
+                  results of the version they were judged on.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2.5">
+              <input
+                type="radio"
+                name="rejudge-scope"
+                className="mt-1 accent-primary"
+                checked={rejudgeScope === "all"}
+                onChange={() => setRejudgeScope("all")}
+              />
+              <span>
+                All submissions ({submissionCount})
+                <span className="block text-muted-foreground">
+                  Also brings each student&apos;s history and your own test submissions up to
+                  this version.
+                </span>
+              </span>
+            </label>
+          </fieldset>
+          {rejudgeCount > LARGE_REJUDGE && (
+            <p role="status" className="rounded-lg bg-warning px-3.5 py-2.5 text-sm text-warning-foreground">
+              This is a large rejudge. Rejudges run before new submissions, so students will
+              wait longer for their results until it is done.
+            </p>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setRejudgeOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" disabled={busy || rejudgeCount === 0} onClick={rejudge}>
+              {action === "rejudge"
+                ? "Starting…"
+                : `Rejudge ${rejudgeCount} submission${rejudgeCount === 1 ? "" : "s"}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>

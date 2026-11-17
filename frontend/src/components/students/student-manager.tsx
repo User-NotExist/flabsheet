@@ -18,6 +18,7 @@ import {
   type StudentCredential,
   updateStudent,
 } from "@/lib/api";
+import { notifySuccess } from "@/lib/notify";
 import { useApiError } from "@/lib/use-api-error";
 
 type StudentAction = { kind: "edit" | "status" | "reset"; student: Student };
@@ -81,15 +82,22 @@ export function StudentManager() {
         setCredential(result);
         setQuery("");
         createForm.current?.reset();
+        notifySuccess(`Student ${result.student.login_id} created.`);
       } else if (action.kind === "reset") {
         const result = await resetStudentPassword(action.student.id);
         if (id !== generation.current) return;
         setCredential(result);
+        notifySuccess(`Password reset for ${action.student.login_id}.`);
       } else {
         await updateStudent(action.student.id, action.kind === "edit"
           ? { display_name: String(data.get("display_name")).trim() }
           : { is_active: !action.student.is_active });
         if (id !== generation.current) return;
+        notifySuccess(
+          action.kind === "edit"
+            ? `Name of ${action.student.login_id} saved.`
+            : `${action.student.login_id} ${action.student.is_active ? "deactivated" : "reactivated"}.`,
+        );
       }
       setAction(null);
       refresh();

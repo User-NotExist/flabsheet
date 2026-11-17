@@ -9,6 +9,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SLUG_PATTERN, createProblem } from "@/lib/api";
+import { notifySuccess } from "@/lib/notify";
 import { useApiError } from "@/lib/use-api-error";
 
 /** "Sort three numbers!" → "sort-three-numbers" */
@@ -60,6 +61,7 @@ export function NewProblemForm() {
     try {
       const problem = await createProblem(title.trim(), effectiveSlug);
       router.replace(`/manage/problems/${problem.id}`);
+      notifySuccess("Problem created.");
     } catch (err) {
       setError(toMessage(err));
       setPending(false);

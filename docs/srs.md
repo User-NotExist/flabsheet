@@ -134,7 +134,7 @@ Every requirement below is MUST unless marked otherwise. "Acceptance" lines stat
 | FR-AUTH-05 | Users can log out, which revokes the session server-side. | Reusing the old cookie after logout gets `401`. |
 | FR-AUTH-06 | Users can change their own password (current password required, except while the account is flagged `must_change_password`). Their other sessions are signed out. | Old password stops working immediately. |
 | FR-AUTH-07 | Accounts flagged `must_change_password` are forced to set a new password on first login, without entering the issued one again. | Generated student passwords trigger the prompt. |
-| FR-AUTH-08 | Failed login attempts are counted per account and, separately, per client IP (default 10 failures / 15 min each). When either count is reached, further attempts are refused until its window ends. A successful login clears the account's count only. | After 10 failures the next attempt is refused with `429` (code `rate_limited`), also from another IP for the same account, and for another account from the same IP. |
+| FR-AUTH-08 | Failed login attempts are counted per account and, separately, per client IP (default 10 failures / 15 min per account and 300 failures / 15 min per IP; the IP limit is higher because a classroom behind one address shares it). When either count is reached, further attempts are refused until its window ends. A successful login clears the account's count only. | After 10 failures on one account the next attempt is refused with `429` (code `rate_limited`), also from another IP. After 300 failures from one IP the next attempt is refused the same way, also for another account. |
 | FR-AUTH-09 | Staff and admin can reset a student's password; admin can reset a staff password. The new password is shown once. | Reset password works; previous sessions are revoked. |
 | FR-AUTH-10 | The first admin account is created by a CLI/seed command at install, never through the web UI. | Fresh install has no web path to create an admin. |
 
@@ -167,7 +167,7 @@ Every requirement below is MUST unless marked otherwise. "Acceptance" lines stat
 | FR-PRB-13 | Build progress and result are shown on the problem page: expected outputs per test case (staff only), reference runtime per test case and the slowest time. If the reference fails (CE, TLE, RE…), the failing test case and log are shown. | A deliberately broken reference produces a readable failure. |
 | FR-PRB-14 | Staff can preview a problem exactly as a student sees it and submit test solutions; staff submissions are excluded from the leaderboard and exports. | Staff submission is judged but not ranked. |
 | FR-PRB-15 | Staff can delete a problem only if it has no student submissions; otherwise they can archive (disable permanently) it. Staff test submissions (FR-PRB-14) do not block deletion: they and their scores are deleted with the problem. | Delete is refused when student submissions exist, and works when only staff submissions exist. |
-| FR-PRB-16 (SHOULD) | Staff can rejudge all submissions of a problem after a new version is built. Rejudges use the `rejudge` lane; each rejudged submission gets a new `job_id` and the next `attempt` number. | Scores update to the new version's results. |
+| FR-PRB-16 (SHOULD) | Staff can rejudge the submissions of a problem after a new version is built: either only those that decide a student's score (each student's latest submission, plus the one holding their score if it is older; the default) or all of them. Rejudges use the `rejudge` lane; each rejudged submission gets a new `job_id` and the next `attempt` number. | Scores update to the new version's results. |
 | FR-PRB-17 | Staff choose the output-checking mode per problem: Lenient (whitespace and line breaks ignored, tokens compared) or Strict (default for new problems; tokens must match and the whitespace layout must match the expected output, else verdict PE). Optional float tolerance (absolute / relative) applies in both modes. Maps to checker.strict and float_abs / float_rel in problem.yaml. The editor warns that in Strict mode the reference solution's exact output, including trailing spaces, becomes the expected layout. | On a Strict problem, output "1  2" against answer "1 2" gets PE; on a Lenient problem it gets AC. A missing final newline or CRLF line endings are accepted in both. |
 
 ### 4.4 Student account management (FR-STU)
@@ -281,10 +281,10 @@ The paths below are backend paths; they are not versioned. The browser calls the
 | Staff accounts | `GET/POST /staff`, `PATCH /staff/{id}`, `POST /staff/{id}/reset-password` | Admin |
 | Operation log | `GET /admin/logs?page=&page_size=&type=&user=&from=&to=` (newest first; `{items, total}`), `GET /admin/logs/types` | Admin |
 | Students | `GET/POST /students`, `POST /students/import` (multipart CSV → result CSV), `PATCH /students/{id}`, `POST /students/{id}/reset-password` | Staff, admin |
-| Problems (manage) | `GET/POST /admin/problems`, `GET/PATCH/DELETE /admin/problems/{id}`, `POST /admin/problems/{id}/enable`, `/disable`, `/archive`, `POST /admin/problems/{id}/images`, `POST /admin/problems/{id}/testdata`, `GET/POST /admin/problems/{id}/build`, `POST /admin/problems/{id}/rejudge` (not built yet), `GET /admin/languages`. `PATCH` saves the whole editor: its optional `config` holds limits, languages, checking mode, reference solution and the ordered test cases (each named by the SHA-256 that `/testdata` returned), so one save creates at most one version | Staff, admin |
+| Problems (manage) | `GET/POST /admin/problems`, `GET/PATCH/DELETE /admin/problems/{id}`, `POST /admin/problems/{id}/enable`, `/disable`, `/archive`, `POST /admin/problems/{id}/images`, `POST /admin/problems/{id}/testdata`, `GET/POST /admin/problems/{id}/build`, `POST /admin/problems/{id}/rejudge`, `GET /admin/languages`. `PATCH` saves the whole editor: its optional `config` holds limits, languages, checking mode, reference solution and the ordered test cases (each named by the SHA-256 that `/testdata` returned), so one save creates at most one version | Staff, admin |
 | Problems (solve) | `GET /problems`, `GET /problems/{slug}` (statement, limits, languages, sample cases only), `GET /images/{id}` (statement image, streamed) | All |
 | Submissions | `POST /problems/{slug}/submissions`, `GET /submissions?problem={slug}` (the caller's own, newest first), `GET /submissions/{id}` (`?student_view=true` gives staff the student shape), `GET /submissions/{id}/stream` (SSE) | Student: own only; staff: any single submission. The staff list of all submissions is `GET /admin/submissions` (Monitoring) |
-| Monitoring | `GET /admin/progress` (matrix), `GET /admin/submissions` (filters), `GET /admin/export/scores.csv`, `GET /admin/export/submissions.csv` | Staff, admin |
+| Monitoring | `GET /admin/progress` (matrix), `GET /admin/submissions` (filters), `POST /admin/submissions/{id}/rejudge`, `POST /admin/submissions/{id}/requeue`, `GET /admin/export/scores.csv`, `GET /admin/export/submissions.csv` | Staff, admin |
 | Leaderboard | `GET /leaderboard` | All |
 | Meta | `GET /languages` (from a backend copy of the judge registry) | All |
 | Instance settings | `GET /settings` (submissions open, banner message, leaderboard mode), `GET /settings/time` (server clock and UTC offset, for the top bar), `PUT /admin/settings/submissions` (killswitch), `PUT /admin/settings/leaderboard` (live / hidden / frozen) | Read: all; killswitch: admin; leaderboard: staff, admin |
@@ -345,7 +345,7 @@ Returns `200` with the same JudgeJob JSON carrying fresh presigned URLs and the 
 
 Because lanes are served in strict priority, a large rejudge delays new student submissions; the UI MUST warn staff before starting a rejudge of more than 200 submissions.
 
-A rejudge replaces the submission's `job_id` with a new ULID and raises `attempt` by one. `job_id` is unique in `submissions` and `judge_outbox`, so reusing it would collide with the earlier outbox row; a worker still holding the old job gets `404` from the refresh endpoint or `409` on its events and drops it.
+A rejudge replaces the submission's `job_id` with a new ULID and raises `attempt` by one. `job_id` is unique in `submissions` and `judge_outbox`, so reusing it would collide with the earlier outbox row; a worker still holding the old job gets `404` from the refresh endpoint or `409` on its events and drops it. A rejudge or requeue always judges against the problem's current version, and the submission's old score stays current until the new result arrives.
 
 ## 7. Non-functional requirements
 
@@ -431,7 +431,7 @@ None remain; every question is settled in 8.3.
 | Per-test-case weights | Equal weight is enough for MVP | FR-JDG-04 |
 | Languages at launch | Only C++20 (cpp20-gcc13) and Python 3.12 (py312) | 2.4 |
 | Session lifetime | 7 days from login, no idle timeout | FR-AUTH-04 |
-| Login rate limit | Separate counts per account and per IP, 10 failures / 15 min | FR-AUTH-08 |
+| Login rate limit | Separate counts per account (10 failures / 15 min) and per IP (300 failures / 15 min) | FR-AUTH-08 |
 | Role changes | None in the web UI; only the install CLI can make an admin | 2.1, FR-ADM-04 |
 | Staff view of hidden-case output | Not available; the judge never sends it | FR-MON-02 |
 | PE message on hidden cases | Not shown | FR-STD-08, 6.1, 6.4 |

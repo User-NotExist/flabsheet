@@ -36,7 +36,7 @@ src/app/(app)/               signed-in pages; layout.tsx renders <TopNav/> insid
 src/app/login, change-password   signed-out/account pages (wrapped in <AuthShell>, no top nav)
 src/app/api/<path>/route.ts  thin forwarders: `return forwardToBackend(request, "/<path>")`
 src/components/ui/           shadcn-generated primitives (badge, button, card, dialog, dropdown-menu, input, label, select,
-                             switch, table, tabs, textarea)
+                             sonner, switch, table, tabs, textarea)
 src/components/data-table/   <DataTable>: the shared TanStack Table v9 table (sorting, search, client-side pages; `serverPages` for a list paged by the backend)
 src/components/<feature>/    feature components (accounts/, auth/, leaderboard/, logs/, nav/, problems/, staff/, students/, solve/, submissions/, settings/,
                              theme/)
@@ -51,6 +51,7 @@ src/lib/session.ts           server-only: checkSession(token) → valid | invali
 src/lib/navigation.ts        NAV_ITEMS (+ roles), canAccessPath, navItemsFor, isActive, ROLE_LABELS
 src/lib/redirect.ts          safeNextPath(): open-redirect guard for ?next=
 src/lib/use-api-error.ts     useApiError(): error → message to show, redirecting to /login on 401
+src/lib/notify.ts            notifySuccess/notifyError/notifyInfo: sonner toasts for the result of an action
 src/lib/sse.ts               useSubmissionProgress(): live judging status over SSE, polling if the stream fails
 src/lib/drafts.ts            code drafts in localStorage, keyed by user, problem and language
 src/lib/theme.ts             light/dark theme: `.dark` on <html>, stored choice, pre-paint script for the root layout
@@ -87,7 +88,7 @@ src/lib/use-is-dark.ts       useIsDark(): the current theme in a Client Componen
 - **`TopNav` awaits `connection()` after `cookies()`**: with `partialPrefetching`, `cookies()` alone resolves in the runtime-prefetch stage, where the dev prerender check still reports a clock read under the session lookup as "unstable value `Date.now()`" (intermittently, pointing at `<TopNav />`). A Server Component that reads the session the same way needs the same line.
 - **Results and verdicts**: draw them with `components/submissions/` (`VerdictBadge`, `ResultReport`, `LiveStatus`, `WhitespaceText`, `format.ts`), so the problem page, the submission page and the staff preview cannot drift apart. `ResultReport` hides a hidden test's data from students even if a response carried it.
 - **Theme**: the server always renders light; the inline script in `app/layout.tsx` adds `.dark` before paint. Style with the `dark:` variant, and use `useIsDark()` only where a prop needs the value (CodeMirror). Its first render is always `false`.
-- **Instance settings**: read them with `useInstanceSettings()` (killswitch, leaderboard mode); don't fetch `/api/settings` again in a page.
+- **Instance settings**: read them with `useInstanceSettings()` (killswitch, leaderboard mode); don't fetch `/api/settings` again in a page. After changing one (`/admin/settings`), call its `refresh()` so the banner updates at once.
 
 ## Style
 
@@ -103,6 +104,7 @@ src/lib/use-is-dark.ts       useIsDark(): the current theme in a Client Componen
 - UI copy:
   - Write short, sentence-case messages that end with a period.
   - Use the real ellipsis `…` in pending labels ("Signing in…").
-  - Show errors with `<FormError message={…} />` (`role="alert"`).
+  - Show form validation errors, a failed form submit and page load errors with `<FormError message={…} />` (`role="alert"`): they stay until fixed.
+  - Report the result of any other action (saved, rejudge queued, toggle failed, copied, export started) and background events (judging or a build finished) with a toast from `lib/notify.ts`. The `<Toaster />` is mounted once in `app/layout.tsx`, bottom-right; don't call `sonner` directly.
   - Messages are user-facing, so never show raw status codes or stack traces.
 - Accessibility: every input has a `<Label htmlFor>`, along with the right `autoComplete`; active nav links get `aria-current="page"`; status messages use `role="status"`.

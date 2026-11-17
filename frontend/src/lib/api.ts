@@ -339,6 +339,10 @@ export type ProblemDetail = {
   /** Number of the version students are judged against, if any. */
   current_version: number | null;
   student_submission_count: number;
+  /** Every submission, staff tests included: a rejudge with scope "all". */
+  submission_count: number;
+  /** The submissions that decide a student's score: scope "latest". */
+  latest_submission_count: number;
   updated_at: string;
   /** The newest version: what the editor edits. */
   version: ProblemVersion | null;
@@ -434,6 +438,26 @@ export async function rebuildProblem(id: number): Promise<ProblemDetail> {
   return (await post(`/admin/problems/${id}/build`)).json();
 }
 
+/** Above this many submissions the UI warns before a rejudge (SRS 6.6). */
+export const LARGE_REJUDGE = 200;
+
+export type RejudgeResult = {
+  rejudged: number;
+  /** Left as they were: the current version does not allow their language. */
+  skipped: number;
+};
+
+/**
+ * "latest": each student's latest submission, plus the one holding their
+ * score if that is an older one. "all": every submission of the problem.
+ */
+export type RejudgeScope = "latest" | "all";
+
+/** Judges the problem's submissions again on its current version. */
+export async function rejudgeProblem(id: number, scope: RejudgeScope): Promise<RejudgeResult> {
+  return (await post(`/admin/problems/${id}/rejudge`, { scope })).json();
+}
+
 /** Stores one test input; a later save refers to it by the returned hash. */
 export async function uploadTestData(id: number, file: Blob): Promise<TestData> {
   const form = new FormData();
@@ -465,6 +489,22 @@ export type InstanceSettings = {
 
 export async function getInstanceSettings(): Promise<InstanceSettings> {
   return (await request("/settings")).json();
+}
+
+/**
+ * Admin only: turns the submission killswitch on (`open` false) or off. The
+ * message is shown in the banner while closed; the backend drops it on reopen.
+ */
+export async function setSubmissionsOpen(
+  open: boolean,
+  message?: string,
+): Promise<InstanceSettings> {
+  return (
+    await send("PUT", "/admin/settings/submissions", {
+      submissions_open: open,
+      submissions_message: message ?? null,
+    })
+  ).json();
 }
 
 export type ServerTime = {
@@ -600,6 +640,8 @@ export type SubmissionListItem = {
   score_milli: number | null;
   max_points: number;
   is_staff: boolean;
+  /** Being judged again by staff: not counted against the submit limit. */
+  rejudge: boolean;
   created_at: string;
 };
 
@@ -743,6 +785,18 @@ export async function listAllSubmissions(
   params.set("page", String(page));
   params.set("page_size", String(pageSize));
   return (await request(`/admin/submissions?${params}`)).json();
+}
+
+export type JudgeAgainResult = { id: number; status: SubmissionStatus; attempt: number };
+
+/** Judges a finished submission again on the problem's current version. */
+export async function rejudgeSubmission(id: number): Promise<JudgeAgainResult> {
+  return (await post(`/admin/submissions/${id}/rejudge`)).json();
+}
+
+/** Sends a delayed submission to the judge again. */
+export async function requeueSubmission(id: number): Promise<JudgeAgainResult> {
+  return (await post(`/admin/submissions/${id}/requeue`)).json();
 }
 
 /** Download link for the raw submissions CSV with the same filters. */

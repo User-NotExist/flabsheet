@@ -33,6 +33,7 @@ import {
   updateStaff,
 } from "@/lib/api";
 import { ROLE_LABELS } from "@/lib/navigation";
+import { notifySuccess } from "@/lib/notify";
 import { useApiError } from "@/lib/use-api-error";
 
 type ActionKind = "edit" | "status" | "reset";
@@ -150,7 +151,6 @@ export function StaffManager() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const [credential, setCredential] = useState<StaffCredential | null>(null);
-  const [created, setCreated] = useState<string | null>(null);
   const [choosePassword, setChoosePassword] = useState(false);
 
   const [action, setAction] = useState<StaffAction | null>(null);
@@ -164,7 +164,6 @@ export function StaffManager() {
     generation.current++;
     setStaff(null);
     setCredential(null);
-    setCreated(null);
     setChoosePassword(false);
     setAction(null);
     setQuery("");
@@ -221,7 +220,6 @@ export function StaffManager() {
 
     setBusy(true);
     setActionError(null);
-    setCreated(null);
 
     try {
       if (!action) {
@@ -231,8 +229,9 @@ export function StaffManager() {
         // A chosen password is already known to the admin, so don't show it again.
         if (generated) {
           setCredential(result);
+          notifySuccess(`Created ${result.staff.login_id}.`);
         } else {
-          setCreated(`Created ${result.staff.login_id}. They must change the password at first login.`);
+          notifySuccess(`Created ${result.staff.login_id}. They must change the password at first login.`);
         }
         setQuery("");
         setChoosePassword(false);
@@ -241,12 +240,18 @@ export function StaffManager() {
         const result = await resetStaffPassword(action.staff.id);
         if (isStale()) return;
         setCredential(result);
+        notifySuccess(`Password reset for ${action.staff.login_id}.`);
       } else {
         const update = action.kind === "edit"
           ? { display_name: String(data.get("display_name")).trim() }
           : { is_active: !action.staff.is_active };
         await updateStaff(action.staff.id, update);
         if (isStale()) return;
+        notifySuccess(
+          action.kind === "edit"
+            ? `Name of ${action.staff.login_id} saved.`
+            : `${action.staff.login_id} ${action.staff.is_active ? "deactivated" : "reactivated"}.`,
+        );
       }
 
       setAction(null);
@@ -331,12 +336,6 @@ export function StaffManager() {
             who="They"
             onSaved={() => setCredential(null)}
           />
-        )}
-
-        {created && (
-          <p role="status" className="rounded-xl border border-primary bg-card px-4 py-3">
-            {created}
-          </p>
         )}
 
         <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,26.5%)]">
