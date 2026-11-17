@@ -331,7 +331,9 @@ export function SolvePage() {
         </div>
       )}
       <Shell>
-        <article className="flex min-w-0 flex-col gap-4 rounded-xl border bg-card p-5">
+        {/* Pinned beside the taller right column so the statement and samples stay
+            in view while reading a result; a long statement scrolls inside */}
+        <article className="flex min-w-0 flex-col gap-4 rounded-xl border bg-card p-5 lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto">
           {!preview && (
             <Link href="/problems" className="w-fit text-sm text-muted-foreground hover:text-foreground">
               ← All problems
@@ -440,6 +442,8 @@ export function SolvePage() {
               onChange={editSource}
               languageId={language}
               ariaLabel="Your code"
+              minHeight="16rem"
+              maxHeight="70dvh"
             />
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <Button
