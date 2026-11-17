@@ -17,7 +17,7 @@ import {
 import { MarkdownEditor } from "@/components/problems/markdown-editor";
 import { StatusBadge, enableBlockedReason } from "@/components/problems/problem-badges";
 import { TestCaseEditor } from "@/components/problems/test-case-editor";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -639,12 +639,15 @@ export function ProblemEditor() {
                 : "Students are judged against the last version that built, also while a newer build is running or has failed."}
             </p>
             {server.current_version !== null && (
-              <Link
-                href={`/problems/${server.slug}`}
-                className={buttonVariants({ variant: "outline" })}
+              // Rendered through Button (not a Link styled with buttonVariants) so it
+              // gets the same element and data-slot as Rebuild/Rejudge and looks identical.
+              <Button
+                variant="outline"
+                nativeButton={false}
+                render={<Link href={`/problems/${server.slug}`} />}
               >
                 Preview as student
-              </Link>
+              </Button>
             )}
           </section>
 
