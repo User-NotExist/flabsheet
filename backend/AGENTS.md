@@ -43,6 +43,7 @@ routers/settings.py     GET /settings: killswitch state, banner message, leaderb
                         PUT /admin/settings/submissions (admin): turn the killswitch on/off with a message, logged as `settings.killswitch`;
                         PUT /admin/settings/leaderboard (staff, admin): live / hidden / frozen, freezing stores a snapshot
 routers/leaderboard.py  GET /leaderboard: standings shaped per viewer (students: no login ids, snapshot while frozen, 403 leaderboard_hidden)
+routers/progress.py     GET /admin/progress (staff, admin): the progress matrix; GET /admin/export/scores.csv: the same as CSV
 routers/internal.py     /internal/* for the judge worker (bearer token): judge-events, judge-jobs/{id}/refresh
 worker.py               arq WorkerSettings: start_build, assemble_package jobs + flush_outbox, resume_builds, detect_delayed crons
 services/auth.py        current_session / CurrentSession / require_role(...) dependencies + CSRF check
@@ -56,6 +57,7 @@ services/judge.py       job ids (ULID), Redis stream push, judge_outbox relay, b
 services/jobs.py        enqueue(): hand a job to the arq worker from sync code (best effort)
 services/languages.py   LANGUAGES: copy of the judge's language registry
 services/leaderboard.py standings query over problem_scores, ranking and tie-break, 5 s Redis cache (lb:cache), freeze snapshot
+services/progress.py    progress matrix (active students × enabled problems, current scores), shared by the page and the scores CSV
 services/submissions.py judge job payload, create_submission, apply_event (judge events), rejudge/requeue/rejudge_problem, current score, progress pub/sub, detect_delayed
 ```
 
@@ -112,7 +114,6 @@ Imports are absolute from the backend root (`from db.models.user import User`, `
 - `GET /healthz` (in `main.py`) is the liveness probe used by the production `HEALTHCHECK`. It doesn't check Postgres or Redis. Keep the route and the Dockerfile in sync, because the prod frontend waits for the backend to be `service_healthy`.
 - There are no tests (deferred until after the MVP, see `docs/backend.md`).
 - Migrations (Alembic) are also deferred.
-- Submissions: progress and the scores export are not built.
 - Problems: SVG images (FR-PRB-06, needs a sanitiser) are not built.
 - A job that waits in the queue longer than the 30-minute presigned URL lifetime (a large rejudge can cause this) reaches the judge with expired URLs; the judge only asks for fresh ones when it reclaims a job.
 - A build that the judge never reports stays `pending`; staff cannot rebuild while it is pending.

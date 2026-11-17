@@ -40,6 +40,7 @@ routers/<area>.py       one APIRouter per area, with its request/response models
   settings.py           GET /settings, GET /settings/time (the endpoints that change settings are planned)
   logs.py               GET /admin/logs (paged, filtered), GET /admin/logs/types
   internal.py           judge endpoints: judge-events, job refresh
+  progress.py           GET /admin/progress (matrix), GET /admin/export/scores.csv
   planned: staff.py, monitoring.py, leaderboard.py
 services/<area>.py      logic shared by routers and background jobs
   auth.py               current_session, require_role, CSRF check
@@ -53,6 +54,7 @@ services/<area>.py      logic shared by routers and background jobs
   jobs.py               enqueue() for the arq worker
   languages.py          copy of the judge's language registry
   submissions.py        judge job, judge events, current score, live progress, 15-minute rule
+  progress.py           progress matrix over problem_scores, shared by the page and the scores CSV
   planned: scoring.py (leaderboard, exports)
 worker.py               arq worker: start_build, assemble_package, flush_outbox, resume_builds, detect_delayed
 ```

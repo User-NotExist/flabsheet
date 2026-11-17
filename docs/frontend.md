@@ -27,8 +27,9 @@ proxy.ts                      session check and role routing (Next 16 "proxy", f
 app/login, app/change-password    signed-out / account pages
 app/(app)/                    signed-in pages, one layout with the top nav
   manage/problems, manage/problems/[id], manage/problems/new, manage/students
+  manage/progress
   problems, problems/[slug], submissions/[id]
-  planned: leaderboard, manage/progress, manage/submissions, manage/leaderboard, admin/staff, admin/settings
+  planned: leaderboard, manage/submissions, manage/leaderboard, admin/staff, admin/settings
 app/api/<path>/route.ts       thin forwarders to the backend (forwardToBackend)
 components/ui/                shadcn primitives
 components/<feature>/         feature components (section below)

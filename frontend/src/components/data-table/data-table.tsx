@@ -73,11 +73,16 @@ import {
 import { cn } from "@/lib/utils";
 
 type ColumnMeta = {
-  /** Right-aligns the header and its cells (numbers). */
-  align?: "right";
+  /** Right-aligns (numbers) or centres the header and its cells. */
+  align?: "right" | "center";
+  /** Keeps the column in view while a wide table scrolls sideways (first column only). */
+  sticky?: boolean;
   /** Extra classes for the body cells of this column. */
   cellClassName?: string;
 };
+
+// The opaque fill hides the cells scrolling underneath
+const STICKY = "sticky left-0 z-10 bg-card";
 
 // Module scope on purpose: the feature registry must keep its identity
 const features = tableFeatures({
@@ -282,7 +287,8 @@ export function DataTable<TData extends RowData>({
                 {group.headers.map((header) => {
                   const { column } = header;
                   const sorted = column.getIsSorted();
-                  const right = column.columnDef.meta?.align === "right";
+                  const meta = column.columnDef.meta;
+                  const right = meta?.align === "right";
                   const content = header.isPlaceholder ? null : (
                     <table.FlexRender header={header} />
                   );
@@ -303,6 +309,8 @@ export function DataTable<TData extends RowData>({
                         "h-auto px-3 py-2.5 text-xs text-muted-foreground",
                         edge,
                         right && "text-right",
+                        meta?.align === "center" && "text-center",
+                        meta?.sticky && STICKY,
                       )}
                     >
                       {column.getCanSort() ? (
@@ -356,6 +364,8 @@ export function DataTable<TData extends RowData>({
                         plain ? "py-2.5" : "py-3",
                         edge,
                         meta?.align === "right" && "text-right tabular-nums",
+                        meta?.align === "center" && "text-center tabular-nums",
+                        meta?.sticky && STICKY,
                         meta?.cellClassName,
                       )}
                     >

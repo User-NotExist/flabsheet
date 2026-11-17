@@ -8,6 +8,11 @@ export function formatPoints(scoreMilli: number): string {
   return String(Math.round(scoreMilli / 10) / 100);
 }
 
+/** Exact points, up to the three decimals the backend stores: 33333 → "33.333". */
+export function formatExactPoints(scoreMilli: number): string {
+  return String(scoreMilli / 1000);
+}
+
 /** "50 / 100", or "– / 100" while there is no score. */
 export function formatScore(scoreMilli: number | null, maxPoints: number): string {
   return `${scoreMilli === null ? "–" : formatPoints(scoreMilli)} / ${maxPoints}`;
