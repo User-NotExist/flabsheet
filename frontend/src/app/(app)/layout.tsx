@@ -1,25 +1,9 @@
-import { Suspense } from "react";
+import { AppShell } from "@/components/nav/app-shell";
 
-import { TopNav, TopNavFallback } from "@/components/nav/top-nav";
-import {
-  InstanceSettingsProvider,
-  KillswitchBanner,
-} from "@/components/settings/instance-settings";
-
-/** Signed-in pages: everything except /login and /change-password. */
+/**
+ * Signed-in pages: everything except /, /login and /change-password.
+ * "/" lives in src/app/page.tsx because signed-out visitors see it too.
+ */
 export default function AppLayout({ children }: LayoutProps<"/">) {
-  return (
-    <>
-      {/* Reads the session cookie, so it streams in behind the boundary */}
-      <Suspense fallback={<TopNavFallback />}>
-        <TopNav />
-      </Suspense>
-      {/* Kept beside the nav, not around it: as a child of this client
-          provider, TopNav's session lookup fails the prerender check */}
-      <InstanceSettingsProvider>
-        <KillswitchBanner />
-        {children}
-      </InstanceSettingsProvider>
-    </>
-  );
+  return <AppShell>{children}</AppShell>;
 }
