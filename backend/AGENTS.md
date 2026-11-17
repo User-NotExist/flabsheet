@@ -39,7 +39,7 @@ routers/images.py       GET /images/{id}: statement images streamed from storage
 routers/solve.py        GET /problems, /problems/{slug} (every role): enabled problems, statement, sample cases; staff preview
 routers/submissions.py  POST /problems/{slug}/submissions, GET /submissions, /submissions/queue (instance-wide queued count), /submissions/{id}, /submissions/{id}/stream (SSE, the one async route)
 routers/logs.py         /admin/logs (admin): the operation log, paged and filtered in SQL (type, user, time range); /admin/logs/types
-routers/settings.py     GET /settings: killswitch state, banner message, leaderboard mode; GET /settings/time: server clock for the top bar
+routers/settings.py     GET /settings: killswitch state, banner message, leaderboard mode; GET /settings/time: server clock for the top bar; PUT /admin/settings/submissions (admin): turn the killswitch on/off with a message, logged as `settings.killswitch`
 routers/internal.py     /internal/* for the judge worker (bearer token): judge-events, judge-jobs/{id}/refresh
 worker.py               arq WorkerSettings: start_build, assemble_package jobs + flush_outbox, resume_builds, detect_delayed crons
 services/auth.py        current_session / CurrentSession / require_role(...) dependencies + CSRF check
@@ -107,7 +107,7 @@ Imports are absolute from the backend root (`from db.models.user import User`, `
 - `GET /healthz` (in `main.py`) is the liveness probe used by the production `HEALTHCHECK`. It doesn't check Postgres or Redis. Keep the route and the Dockerfile in sync, because the prod frontend waits for the backend to be `service_healthy`.
 - There are no tests (deferred until after the MVP, see `docs/backend.md`).
 - Migrations (Alembic) are also deferred.
-- Settings: only `GET /settings` exists. Nothing changes the killswitch or the leaderboard mode yet, so until `/admin/settings` is built the `instance_settings` row is edited in the database.
+- Settings: the killswitch can be changed (`PUT /admin/settings/submissions`), but nothing changes the leaderboard mode yet, so that part of the `instance_settings` row is still edited in the database.
 - Submissions: progress, leaderboard and the scores export are not built.
 - Problems: SVG images (FR-PRB-06, needs a sanitiser) are not built.
 - A job that waits in the queue longer than the 30-minute presigned URL lifetime (a large rejudge can cause this) reaches the judge with expired URLs; the judge only asks for fresh ones when it reclaims a job.

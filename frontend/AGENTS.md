@@ -87,7 +87,7 @@ src/lib/use-is-dark.ts       useIsDark(): the current theme in a Client Componen
 - **`TopNav` awaits `connection()` after `cookies()`**: with `partialPrefetching`, `cookies()` alone resolves in the runtime-prefetch stage, where the dev prerender check still reports a clock read under the session lookup as "unstable value `Date.now()`" (intermittently, pointing at `<TopNav />`). A Server Component that reads the session the same way needs the same line.
 - **Results and verdicts**: draw them with `components/submissions/` (`VerdictBadge`, `ResultReport`, `LiveStatus`, `WhitespaceText`, `format.ts`), so the problem page, the submission page and the staff preview cannot drift apart. `ResultReport` hides a hidden test's data from students even if a response carried it.
 - **Theme**: the server always renders light; the inline script in `app/layout.tsx` adds `.dark` before paint. Style with the `dark:` variant, and use `useIsDark()` only where a prop needs the value (CodeMirror). Its first render is always `false`.
-- **Instance settings**: read them with `useInstanceSettings()` (killswitch, leaderboard mode); don't fetch `/api/settings` again in a page.
+- **Instance settings**: read them with `useInstanceSettings()` (killswitch, leaderboard mode); don't fetch `/api/settings` again in a page. After changing one (`/admin/settings`), call its `refresh()` so the banner updates at once.
 
 ## Style
 
