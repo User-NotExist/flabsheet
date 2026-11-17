@@ -803,3 +803,40 @@ export async function requeueSubmission(id: number): Promise<JudgeAgainResult> {
 export function submissionsCsvUrl(filters: SubmissionFilters): string {
   return `${API_URL}/admin/export/submissions.csv?${submissionFilterQuery(filters)}`;
 }
+
+// --- Progress (staff) -------------------------------------------------------
+// Mirrors ProgressOut in backend/routers/progress.py.
+
+export type ProgressProblem = { id: number; slug: string; title: string; max_points: number };
+
+export type ProgressCell = {
+  problem_id: number;
+  score_milli: number;
+  state: Exclude<SolveState, "not_attempted">;
+  /** The submission that set this score. */
+  submission_id: number;
+};
+
+export type ProgressRow = {
+  id: number;
+  login_id: string;
+  display_name: string;
+  /** Equals the student's leaderboard total. */
+  total_milli: number;
+  solved: number;
+  /** Only scored problems; a problem missing here is not attempted. */
+  cells: ProgressCell[];
+};
+
+export type Progress = { problems: ProgressProblem[]; rows: ProgressRow[] };
+
+/** Active students × enabled problems, highest total first (FR-MON-01). */
+export async function getProgress(): Promise<Progress> {
+  return (await request("/admin/progress")).json();
+}
+
+/** Download link for the scores CSV (FR-MON-04): same rows as getProgress. */
+export const SCORES_CSV_URL = `${API_URL}/admin/export/scores.csv`;
+
+/** Download link for every student submission, unfiltered (staff tests left out, FR-PRB-14). */
+export const STUDENT_SUBMISSIONS_CSV_URL = `${API_URL}/admin/export/submissions.csv`;

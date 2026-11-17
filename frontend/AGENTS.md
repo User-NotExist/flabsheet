@@ -38,11 +38,12 @@ src/app/api/<path>/route.ts  thin forwarders: `return forwardToBackend(request, 
 src/components/ui/           shadcn-generated primitives (badge, button, card, dialog, dropdown-menu, input, label, select,
                              sonner, switch, table, tabs, textarea)
 src/components/data-table/   <DataTable>: the shared TanStack Table v9 table (sorting, search, client-side pages; `serverPages` for a list paged by the backend)
-src/components/<feature>/    feature components (accounts/, auth/, leaderboard/, logs/, nav/, problems/, staff/, students/, solve/, submissions/, settings/,
+src/components/<feature>/    feature components (accounts/, auth/, leaderboard/, logs/, nav/, problems/, progress/, staff/, students/, solve/, submissions/, settings/,
                              theme/)
 src/app/(app)/manage/problems  staff problem list, /new (title + slug), /[id] (editor)
 src/app/(app)/problems       /problems (list with own scores), /[slug] (statement, editor, submit, live result, history;
                              staff see it as a preview)
+src/app/(app)/manage/progress  staff progress matrix (students × enabled problems), scores and submissions CSV links
 src/app/(app)/leaderboard    student standings (live, frozen snapshot or hidden); manage/leaderboard: staff live standings + mode switch
 src/app/(app)/submissions/[id]  one result report (student: own; staff: anyone's, with hidden-case details)
 src/lib/api.ts               browser client: fetch /api/*, ApiError, CSRF token handling, shared types
