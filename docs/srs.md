@@ -291,7 +291,7 @@ The paths below are backend paths; they are not versioned. The browser calls the
 
 The API MUST shape responses per role: the student serializer for a submission omits hidden test case output, expected output and every checker message on a hidden case (including PE messages), and shows `hint` only on failed cases.
 
-Errors are JSON `{"detail": "Sentence for the user."}`. Where the UI must react to the kind of error, the body also has a stable `code`: `submissions_closed`, `rate_limited`, `language_not_allowed`, `problem_disabled`, `csv_invalid`. The UI shows `detail` and branches only on `code` or the HTTP status.
+Errors are JSON `{"detail": "Sentence for the user."}`. Where the UI must react to the kind of error, the body also has a stable `code`: `submissions_closed`, `rate_limited`, `language_not_allowed`, `problem_disabled`, `csv_invalid`, `leaderboard_hidden`. The UI shows `detail` and branches only on `code` or the HTTP status.
 
 ### 6.2 Submission flow
 

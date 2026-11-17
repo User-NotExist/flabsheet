@@ -150,6 +150,8 @@ type DataTableProps<TData extends RowData> = {
   variant?: "card" | "plain";
   /** Classes for the <table>, e.g. a min width so it scrolls sideways on phones. */
   className?: string;
+  /** Extra classes for one body row, e.g. to highlight the viewer's own row. */
+  rowClassName?: (row: TData) => string | undefined;
 };
 
 export function DataTable<TData extends RowData>({
@@ -168,6 +170,7 @@ export function DataTable<TData extends RowData>({
   serverPages,
   variant = "card",
   className,
+  rowClassName,
 }: DataTableProps<TData>) {
   const searchId = useId();
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -342,7 +345,7 @@ export function DataTable<TData extends RowData>({
               </TableRow>
             )}
             {rows.map((row) => (
-              <TableRow key={row.id}>
+              <TableRow key={row.id} className={rowClassName?.(row.original)}>
                 {row.getAllCells().map((cell) => {
                   const meta = cell.column.columnDef.meta;
                   return (
