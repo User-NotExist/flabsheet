@@ -482,7 +482,9 @@ export type InstanceSettings = {
   /** False while the admin's killswitch is on: nobody can submit. */
   submissions_open: boolean;
   submissions_message: string | null;
-  leaderboard_mode: "live" | "frozen" | "hidden";
+  leaderboard_mode: LeaderboardMode;
+  /** When the leaderboard was frozen; null unless it is frozen. */
+  leaderboard_frozen_at: string | null;
 };
 
 export async function getInstanceSettings(): Promise<InstanceSettings> {
@@ -521,6 +523,45 @@ export async function getServerTime(): Promise<ServerTime> {
     epochMs: Date.parse(data.now),
     utcOffsetMinutes: data.utc_offset_minutes,
   };
+}
+
+// --- Leaderboard ------------------------------------------------------------
+// Mirrors backend/routers/leaderboard.py and the leaderboard part of
+// backend/routers/settings.py.
+
+export type LeaderboardMode = "live" | "frozen" | "hidden";
+
+export type LeaderboardRow = {
+  /** Equal total and tie time share a rank. */
+  rank: number;
+  display_name: string;
+  total_milli: number;
+  solved: number;
+  /** The viewer's own row. */
+  is_me: boolean;
+  /** Staff and admins only; always null for students (FR-STD-03). */
+  login_id: string | null;
+};
+
+export type Leaderboard = {
+  /** What students see. Staff always get live rows whatever the mode. */
+  mode: LeaderboardMode;
+  frozen_at: string | null;
+  /** True when `rows` are the standings as of `frozen_at`. */
+  showing_snapshot: boolean;
+  rows: LeaderboardRow[];
+};
+
+/** Throws ApiError(403, code "leaderboard_hidden") to students while it is hidden. */
+export async function getLeaderboard(): Promise<Leaderboard> {
+  return (await request("/leaderboard")).json();
+}
+
+/** Staff: choose what students see. Freezing takes a snapshot of the standings now. */
+export async function setLeaderboardMode(
+  mode: LeaderboardMode,
+): Promise<Pick<InstanceSettings, "leaderboard_mode" | "leaderboard_frozen_at">> {
+  return (await send("PUT", "/admin/settings/leaderboard", { mode })).json();
 }
 
 // --- Solving problems (every role) -----------------------------------------

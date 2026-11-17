@@ -39,7 +39,10 @@ routers/images.py       GET /images/{id}: statement images streamed from storage
 routers/solve.py        GET /problems, /problems/{slug} (every role): enabled problems, statement, sample cases; staff preview
 routers/submissions.py  POST /problems/{slug}/submissions, GET /submissions, /submissions/queue (instance-wide queued count), /submissions/{id}, /submissions/{id}/stream (SSE, the one async route)
 routers/logs.py         /admin/logs (admin): the operation log, paged and filtered in SQL (type, user, time range); /admin/logs/types
-routers/settings.py     GET /settings: killswitch state, banner message, leaderboard mode; GET /settings/time: server clock for the top bar; PUT /admin/settings/submissions (admin): turn the killswitch on/off with a message, logged as `settings.killswitch`
+routers/settings.py     GET /settings: killswitch state, banner message, leaderboard mode; GET /settings/time: server clock for the top bar;
+                        PUT /admin/settings/submissions (admin): turn the killswitch on/off with a message, logged as `settings.killswitch`;
+                        PUT /admin/settings/leaderboard (staff, admin): live / hidden / frozen, freezing stores a snapshot
+routers/leaderboard.py  GET /leaderboard: standings shaped per viewer (students: no login ids, snapshot while frozen, 403 leaderboard_hidden)
 routers/internal.py     /internal/* for the judge worker (bearer token): judge-events, judge-jobs/{id}/refresh
 worker.py               arq WorkerSettings: start_build, assemble_package jobs + flush_outbox, resume_builds, detect_delayed crons
 services/auth.py        current_session / CurrentSession / require_role(...) dependencies + CSRF check
@@ -52,6 +55,7 @@ services/packages.py    problem.yaml, staging/final package zips, the three buil
 services/judge.py       job ids (ULID), Redis stream push, judge_outbox relay, batched send for a rejudge
 services/jobs.py        enqueue(): hand a job to the arq worker from sync code (best effort)
 services/languages.py   LANGUAGES: copy of the judge's language registry
+services/leaderboard.py standings query over problem_scores, ranking and tie-break, 5 s Redis cache (lb:cache), freeze snapshot
 services/submissions.py judge job payload, create_submission, apply_event (judge events), rejudge/requeue/rejudge_problem, current score, progress pub/sub, detect_delayed
 ```
 
@@ -88,6 +92,7 @@ Imports are absolute from the backend root (`from db.models.user import User`, `
 - **Background jobs must be resumable**: `enqueue()` may silently fail, so every job needs a database state the `resume_builds` cron can find, and must be safe to run twice (lock the row, return if already done).
 - **Judging again goes through `services/submissions.py`** (`rejudge`, `requeue`, `rejudge_problem`): lock the submission, new `job_id`, next `attempt`, current version, new outbox row. Never reuse a `job_id` or reset a submission by hand. The old score stays until the new result arrives.
 - **`/internal/*` never answers 4xx** except 401 and 409: the judge drops an event on any other 4xx and retries on 5xx.
+- **Student ids never reach other students on the leaderboard**: `routers/leaderboard.py` fills `login_id` only for staff and admins, and marks the caller's row with `is_me` instead of sending user ids (FR-STD-03).
 - **Hidden test data never reaches a student**: `routers/submissions.py` shapes every result per viewer (`_result_out`), and `services/submissions.py` refuses to store output for a hidden case. Check both when you add a field to a result or a new way to read one (NFR-SEC-07).
 - **Judge events are applied exactly once**: `apply_event` locks the submission, answers 409 for an older attempt or another job id, and dedups on `judge_events.event_id` with `ON CONFLICT DO NOTHING ... RETURNING` (the driver's `rowcount` is -1 here, so never test that).
 - **The stream route holds no database connection**: it is `async def`, authenticates in a thread with its own `SessionLocal()`, and must not take `Db` or `CurrentSession` as dependencies.
@@ -107,8 +112,7 @@ Imports are absolute from the backend root (`from db.models.user import User`, `
 - `GET /healthz` (in `main.py`) is the liveness probe used by the production `HEALTHCHECK`. It doesn't check Postgres or Redis. Keep the route and the Dockerfile in sync, because the prod frontend waits for the backend to be `service_healthy`.
 - There are no tests (deferred until after the MVP, see `docs/backend.md`).
 - Migrations (Alembic) are also deferred.
-- Settings: the killswitch can be changed (`PUT /admin/settings/submissions`), but nothing changes the leaderboard mode yet, so that part of the `instance_settings` row is still edited in the database.
-- Submissions: progress, leaderboard and the scores export are not built.
+- Submissions: progress and the scores export are not built.
 - Problems: SVG images (FR-PRB-06, needs a sanitiser) are not built.
 - A job that waits in the queue longer than the 30-minute presigned URL lifetime (a large rejudge can cause this) reaches the judge with expired URLs; the judge only asks for fresh ones when it reclaims a job.
 - A build that the judge never reports stays `pending`; staff cannot rebuild while it is pending.
