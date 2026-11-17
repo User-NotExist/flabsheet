@@ -41,6 +41,7 @@ app.include_router(submissions.router)
 app.include_router(admin_submissions.router)
 app.include_router(admin_submissions.export_router)
 app.include_router(settings_router.router)
+app.include_router(settings_router.admin_router)
 app.include_router(logs.router)
 app.include_router(internal.router)
 
