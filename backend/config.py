@@ -23,9 +23,12 @@ class Settings(BaseSettings):
     session_ttl_days: int = 7
     # None = derive from frontend_url (Secure only when the site is served over https)
     session_cookie_secure: bool | None = None
-    # Failed logins allowed per login id, and separately per client IP, inside
-    # the window before 429
+    # Failed logins allowed per login id inside the window before 429
     login_rate_limit_attempts: int = 10
+    # Same, per client IP. Much higher than the per-login-id limit because a
+    # whole room behind one NAT shares it (sized for 60-80 students); each
+    # account is still protected by its own limit.
+    login_rate_limit_ip_attempts: int = 300
     login_rate_limit_window_seconds: int = 900
 
     # --- object storage (RustFS / S3 API, path-style) ---
