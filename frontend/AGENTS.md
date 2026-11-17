@@ -32,9 +32,12 @@ No tests exist yet. A change is done when `lint` and `tsc` pass. For UI changes,
 ```
 src/proxy.ts                 auth gate for every page (Next 16 "proxy", formerly middleware); /api excluded
 src/app/layout.tsx           root layout, Geist fonts, metadata template "%s · Flabsheet"
-src/app/(app)/               signed-in pages; layout.tsx renders <TopNav/> inside <Suspense>
-src/app/(app)/page.tsx       "/" when signed in: role dashboard (components/home/: student progress and rank, staff course state + quick links)
-src/app/welcome              public landing page; proxy.ts rewrites "/" to it for signed-out visitors (components/landing/)
+src/app/opengraph-image.tsx  link preview image (next/og); root generateMetadata sets metadataBase from the request
+                             (lib/request-origin.ts) and the og/twitter card; site copy in lib/site.ts
+src/app/page.tsx             "/": picks by session (lib/current-session.ts) between the role dashboard inside <AppShell>
+                             (components/home/) and the public landing page (components/landing/). Not a proxy.ts
+                             rewrite: Next.js fetches rewrites as external URLs, which breaks behind HTTPS proxies
+src/app/(app)/               signed-in pages; layout.tsx wraps them in <AppShell> (components/nav/app-shell.tsx)
 src/app/login, change-password   signed-out/account pages (wrapped in <AuthShell>, no top nav)
 src/app/api/<path>/route.ts  thin forwarders: `return forwardToBackend(request, "/<path>")`
 src/components/ui/           shadcn-generated primitives (badge, button, card, dialog, dropdown-menu, input, label, select,
@@ -87,7 +90,7 @@ src/lib/use-is-dark.ts       useIsDark(): the current theme in a Client Componen
 - **Dynamic route params in a Client Component**: read them with `useParams()` and render the component inside `<Suspense>` in the page (see `manage/problems/[id]/page.tsx`).
 - **Markdown**: render it only through `components/problems/markdown-view.tsx` (sanitised, no raw HTML, KaTeX), so previews and student views match.
 - **Data fetching**: there is no query library. Fetch in an effect through `lib/api.ts`, keep the result in state, and after a change set that state from the response or fetch again. A hidden page re-runs its effects when it is shown again, which is what keeps scores and history fresh.
-- **Client providers in `(app)/layout.tsx` go beside `<TopNav />`, not around it**: wrapped in a client component, its session lookup fails the dev prerender check ("unstable value `Date.now()`").
+- **Client providers in `components/nav/app-shell.tsx` go beside `<TopNav />`, not around it**: wrapped in a client component, its session lookup fails the dev prerender check ("unstable value `Date.now()`").
 - **`TopNav` awaits `connection()` after `cookies()`**: with `partialPrefetching`, `cookies()` alone resolves in the runtime-prefetch stage, where the dev prerender check still reports a clock read under the session lookup as "unstable value `Date.now()`" (intermittently, pointing at `<TopNav />`). A Server Component that reads the session the same way needs the same line.
 - **Results and verdicts**: draw them with `components/submissions/` (`VerdictBadge`, `ResultReport`, `LiveStatus`, `WhitespaceText`, `format.ts`), so the problem page, the submission page and the staff preview cannot drift apart. `ResultReport` hides a hidden test's data from students even if a response carried it.
 - **Theme**: the server always renders light; the inline script in `app/layout.tsx` adds `.dark` before paint. Style with the `dark:` variant, and use `useIsDark()` only where a prop needs the value (CodeMirror). Its first render is always `false`.

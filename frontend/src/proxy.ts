@@ -13,12 +13,11 @@ import { checkSession, SESSION_COOKIE } from "@/lib/session";
  * Authentication gate for every page. `/api/*` is excluded: those requests
  * are forwarded to the backend, which answers 401 itself.
  *
- * - no valid session on /       -> the public landing page (/welcome, URL stays /)
+ * - no valid session on /       -> through: app/page.tsx shows the landing page
  * - no valid session elsewhere   -> /login?next=<requested path>
  * - backend could not be asked   -> same, plus ?reason=unavailable on /login
  * - session must change password -> /change-password?next=<requested path>
  * - signed in and on /login      -> back into the app
- * - signed in and on /welcome    -> / (the dashboard)
  * - role may not open the page   -> / (see NAV_ITEMS in lib/navigation.ts)
  *
  * The session cookie is an opaque token, so validity is checked by asking the
@@ -29,8 +28,6 @@ import { checkSession, SESSION_COOKIE } from "@/lib/session";
 
 const LOGIN_PATH = "/login";
 const CHANGE_PASSWORD_PATH = "/change-password";
-// Visitors see this page at "/"; it lives outside (app) so it needs no session
-const LANDING_PATH = "/welcome";
 
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
@@ -54,7 +51,6 @@ export async function proxy(request: NextRequest) {
       const next = safeNextPath(request.nextUrl.searchParams.get("next"));
       return redirectTo(canAccessPath(next, session.user.role) ? next : "/");
     }
-    if (pathname === LANDING_PATH) return redirectTo("/");
     if (!canAccessPath(pathname, session.user.role)) return redirectTo("/");
     return NextResponse.next();
   }
@@ -81,12 +77,10 @@ export async function proxy(request: NextRequest) {
       }
       response = NextResponse.redirect(url);
     }
-  } else if (pathname === LANDING_PATH) {
-    response = NextResponse.next();
   } else if (pathname === "/") {
-    // A rewrite, not a redirect: the address stays "/", and signing in then
-    // turns the same URL into the dashboard
-    response = NextResponse.rewrite(new URL(LANDING_PATH, request.url));
+    // Public: the page itself shows the landing page to signed-out visitors.
+    // Not a rewrite to a separate route: see the comment in app/page.tsx.
+    response = NextResponse.next();
   } else {
     const loginUrl = new URL(LOGIN_PATH, request.url);
     const next = pathname + search;
@@ -106,7 +100,8 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Everything except /api, Next.js internals and static files
-    "/((?!api/|_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // Everything except /api, Next.js internals, static files and the link
+    // preview image (fetched by signed-out crawlers)
+    "/((?!api/|_next/static|_next/image|favicon\\.ico|opengraph-image|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };
