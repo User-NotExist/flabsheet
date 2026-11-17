@@ -257,7 +257,7 @@ export function LogViewer() {
   const total = loaded?.page.total ?? 0;
 
   return (
-    <main className="min-h-[calc(100vh-3rem)] bg-muted/30 text-sm">
+    <main className="text-sm">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-7 sm:px-6">
         <header>
           <h1 className="text-xl font-semibold tracking-tight">Logs</h1>

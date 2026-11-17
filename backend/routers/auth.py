@@ -143,7 +143,7 @@ def login(body: LoginRequest, request: Request, response: Response, db: Db):
             info={"login_id": body.login_id, "ip": client_ip, "reason": reason},
         )
         # Same response for every failure reason: do not reveal which one it was
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid login id or password")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid login ID or password.")
 
     if password_hasher.check_needs_rehash(user.password_hash):
         user.password_hash = password_hasher.hash(body.password)

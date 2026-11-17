@@ -26,6 +26,18 @@ import {
   changePassword,
   getSession,
 } from "@/lib/api";
+import { safeNextPath, withNext } from "@/lib/redirect";
+
+// Where to go once the password is changed: the page the user was on its way
+// to when proxy.ts or the login form sent them here.
+function nextPath(): string | null {
+  return new URLSearchParams(window.location.search).get("next");
+}
+
+// Back here after signing in again, still on the way to `next`
+function loginPath(): string {
+  return withNext("/login", withNext("/change-password", nextPath()));
+}
 
 export function ChangePasswordForm() {
   const router = useRouter();
@@ -59,7 +71,7 @@ export function ChangePasswordForm() {
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 401) {
-          router.replace("/login?next=/change-password");
+          router.replace(loginPath());
         }
       });
     return () => {
@@ -91,10 +103,10 @@ export function ChangePasswordForm() {
     setPending(true);
     try {
       await changePassword(current, next);
-      window.location.replace("/");
+      window.location.replace(safeNextPath(nextPath()));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        router.replace("/login?next=/change-password");
+        router.replace(loginPath());
         return;
       }
       setError(

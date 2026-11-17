@@ -1,7 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { canAccessPath } from "@/lib/navigation";
-import { safeNextPath } from "@/lib/redirect";
+import {
+  LOGIN_REASON_PARAM,
+  LOGIN_REASON_UNAVAILABLE,
+  safeNextPath,
+  withNext,
+} from "@/lib/redirect";
 import { checkSession, SESSION_COOKIE } from "@/lib/session";
 
 /**
@@ -10,7 +15,8 @@ import { checkSession, SESSION_COOKIE } from "@/lib/session";
  *
  * - no valid session on /       -> the public landing page (/welcome, URL stays /)
  * - no valid session elsewhere   -> /login?next=<requested path>
- * - session must change password -> /change-password
+ * - backend could not be asked   -> same, plus ?reason=unavailable on /login
+ * - session must change password -> /change-password?next=<requested path>
  * - signed in and on /login      -> back into the app
  * - signed in and on /welcome    -> / (the dashboard)
  * - role may not open the page   -> / (see NAV_ITEMS in lib/navigation.ts)
@@ -36,9 +42,13 @@ export async function proxy(request: NextRequest) {
 
   if (session.state === "valid") {
     if (session.user.must_change_password) {
-      return pathname === CHANGE_PASSWORD_PATH
-        ? NextResponse.next()
-        : redirectTo(CHANGE_PASSWORD_PATH);
+      if (pathname === CHANGE_PASSWORD_PATH) return NextResponse.next();
+      // Carry the page they wanted through the password change
+      const next =
+        pathname === LOGIN_PATH
+          ? request.nextUrl.searchParams.get("next")
+          : pathname + search;
+      return redirectTo(withNext(CHANGE_PASSWORD_PATH, next));
     }
     if (pathname === LOGIN_PATH) {
       const next = safeNextPath(request.nextUrl.searchParams.get("next"));
@@ -50,8 +60,28 @@ export async function proxy(request: NextRequest) {
   }
 
   // Not signed in (or we cannot tell: fail closed).
+  // When we cannot tell, /login carries ?reason=unavailable so the page can
+  // say the server is slow instead of looking like the session was lost
+  // (signing in again would only bounce back here). Only proxy.ts sets or
+  // clears it, so a stale copy in the URL never outlives the outage.
+  const unavailable = session.state === "unknown";
   let response: NextResponse;
-  if (pathname === LOGIN_PATH || pathname === LANDING_PATH) {
+  if (pathname === LOGIN_PATH) {
+    const params = request.nextUrl.searchParams;
+    const tagged =
+      params.get(LOGIN_REASON_PARAM) === LOGIN_REASON_UNAVAILABLE;
+    if (unavailable === tagged) {
+      response = NextResponse.next();
+    } else {
+      const url = request.nextUrl.clone();
+      if (unavailable) {
+        url.searchParams.set(LOGIN_REASON_PARAM, LOGIN_REASON_UNAVAILABLE);
+      } else {
+        url.searchParams.delete(LOGIN_REASON_PARAM);
+      }
+      response = NextResponse.redirect(url);
+    }
+  } else if (pathname === LANDING_PATH) {
     response = NextResponse.next();
   } else if (pathname === "/") {
     // A rewrite, not a redirect: the address stays "/", and signing in then
@@ -61,6 +91,9 @@ export async function proxy(request: NextRequest) {
     const loginUrl = new URL(LOGIN_PATH, request.url);
     const next = pathname + search;
     if (next !== "/") loginUrl.searchParams.set("next", next);
+    if (unavailable) {
+      loginUrl.searchParams.set(LOGIN_REASON_PARAM, LOGIN_REASON_UNAVAILABLE);
+    }
     response = NextResponse.redirect(loginUrl);
   }
   // Drop a cookie the backend has rejected so we stop re-checking it.
