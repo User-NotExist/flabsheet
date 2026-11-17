@@ -75,10 +75,25 @@ type Props = {
   languageId: string;
   ariaLabel: string;
   readOnly?: boolean;
+  /**
+   * Grow with the code between these heights instead of the fixed 24rem; past
+   * `maxHeight` the editor scrolls inside. Without either it stays fixed.
+   */
+  minHeight?: string;
+  maxHeight?: string;
 };
 
-export function CodeEditor({ value, onChange, languageId, ariaLabel, readOnly }: Props) {
+export function CodeEditor({
+  value,
+  onChange,
+  languageId,
+  ariaLabel,
+  readOnly,
+  minHeight,
+  maxHeight,
+}: Props) {
   const dark = useIsDark();
+  const grows = minHeight !== undefined || maxHeight !== undefined;
 
   return (
     <CodeMirror
@@ -89,7 +104,9 @@ export function CodeEditor({ value, onChange, languageId, ariaLabel, readOnly }:
       theme={dark ? "dark" : "light"}
       readOnly={readOnly}
       aria-label={ariaLabel}
-      height="24rem"
+      height={grows ? undefined : "24rem"}
+      minHeight={minHeight}
+      maxHeight={maxHeight}
       className="overflow-hidden rounded-lg border text-sm"
     />
   );
