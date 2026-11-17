@@ -108,7 +108,7 @@ export function LandingPage() {
         </div>
       </header>
 
-      <main className="flex flex-1 flex-col bg-muted/50">
+      <main className="flex flex-1 flex-col">
         <section className="mx-auto grid w-full max-w-5xl items-center gap-10 px-4 py-14 sm:px-6 md:grid-cols-[1.1fr_1fr] md:py-20">
           <div className="flex flex-col items-start gap-5">
             <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">

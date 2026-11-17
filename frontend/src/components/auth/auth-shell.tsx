@@ -19,7 +19,7 @@ export function AuthShell({
   children: ReactNode;
 }) {
   return (
-    <main className="flex flex-1 flex-col items-center justify-center gap-7 bg-muted/50 px-4 py-12">
+    <main className="flex flex-1 flex-col items-center justify-center gap-7 px-4 py-12">
       <p className="text-2xl font-semibold tracking-tight">Flabsheet</p>
       <Card className="w-full max-w-[25rem] gap-6 ring-foreground/10 [--card-spacing:--spacing(8)]">
         <CardHeader className="gap-1.5">

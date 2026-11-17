@@ -1,6 +1,7 @@
 "use client";
 
-import { useLayoutEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useLayoutEffect, useState, type FormEvent } from "react";
 
 import { AUTH_BUTTON_CLASS, AUTH_INPUT_CLASS, resetOnDetach } from "@/components/auth/auth-shell";
 import { FormError } from "@/components/auth/form-error";
@@ -8,7 +9,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError, login } from "@/lib/api";
-import { safeNextPath } from "@/lib/redirect";
+import {
+  LOGIN_REASON_PARAM,
+  LOGIN_REASON_UNAVAILABLE,
+  safeNextPath,
+  withNext,
+} from "@/lib/redirect";
 
 function loginErrorMessage(error: unknown): string {
   if (!(error instanceof ApiError)) return "Something went wrong. Please try again.";
@@ -19,8 +25,27 @@ function loginErrorMessage(error: unknown): string {
       : error.message;
   }
   // A malformed login id fails validation; don't treat it differently
-  if (error.status === 422) return "Invalid login id or password";
+  if (error.status === 422) return "Invalid login ID or password.";
   return error.message;
+}
+
+/**
+ * Shown when proxy.ts could not ask the backend about the session. Reads the
+ * query with useSearchParams (inside <Suspense>, so the rest of the form still
+ * prerenders) because the router may show this page again from its cache.
+ */
+function SessionCheckNotice() {
+  const params = useSearchParams();
+  if (params.get(LOGIN_REASON_PARAM) !== LOGIN_REASON_UNAVAILABLE) return null;
+  return (
+    <p
+      role="status"
+      className="rounded-lg bg-warning px-3.5 py-2.5 text-sm leading-relaxed text-warning-foreground"
+    >
+      The server is slow to respond, so your sign-in could not be checked. If
+      you were signed in, wait a moment and reload the page.
+    </p>
+  );
 }
 
 export function LoginForm() {
@@ -48,7 +73,9 @@ export function LoginForm() {
       );
       const next = new URLSearchParams(window.location.search).get("next");
       window.location.replace(
-        user.must_change_password ? "/change-password" : safeNextPath(next),
+        user.must_change_password
+          ? withNext("/change-password", next)
+          : safeNextPath(next),
       );
     } catch (err) {
       setError(loginErrorMessage(err));
@@ -63,6 +90,9 @@ export function LoginForm() {
       onSubmit={handleSubmit}
       className="flex flex-col gap-5"
     >
+      <Suspense fallback={null}>
+        <SessionCheckNotice />
+      </Suspense>
       <div className="flex flex-col gap-2">
         <Label htmlFor="login_id">Login ID</Label>
         <Input

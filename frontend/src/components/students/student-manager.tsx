@@ -157,7 +157,7 @@ export function StudentManager() {
   const actionTitle = action?.kind === "edit" ? "Edit name" : action?.kind === "reset" ? "Reset password" : action?.student.is_active ? "Deactivate student" : "Reactivate student";
 
   return (
-    <main className="min-h-[calc(100vh-3rem)] bg-muted/30 text-sm">
+    <main className="text-sm">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-7 sm:px-6">
         <header>
           <h1 className="text-xl font-semibold tracking-tight">Students</h1>
