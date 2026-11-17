@@ -1,17 +1,10 @@
-import { AccountPanel } from "@/components/auth/account-panel";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import type { Metadata } from "next";
 
-export default function Home() {
-  return (
-    <main className="flex flex-1 items-center justify-center p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>Flabsheet</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <AccountPanel />
-        </CardContent>
-      </Card>
-    </main>
-  );
+import { Dashboard } from "@/components/home/dashboard";
+
+export const metadata: Metadata = { title: "Home" };
+
+/** Signed-in home. Signed-out visitors get the landing page here (proxy.ts). */
+export default function HomePage() {
+  return <Dashboard />;
 }

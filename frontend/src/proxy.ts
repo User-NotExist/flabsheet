@@ -8,9 +8,11 @@ import { checkSession, SESSION_COOKIE } from "@/lib/session";
  * Authentication gate for every page. `/api/*` is excluded: those requests
  * are forwarded to the backend, which answers 401 itself.
  *
- * - no valid session            -> /login?next=<requested path>
+ * - no valid session on /       -> the public landing page (/welcome, URL stays /)
+ * - no valid session elsewhere   -> /login?next=<requested path>
  * - session must change password -> /change-password
  * - signed in and on /login      -> back into the app
+ * - signed in and on /welcome    -> / (the dashboard)
  * - role may not open the page   -> / (see NAV_ITEMS in lib/navigation.ts)
  *
  * The session cookie is an opaque token, so validity is checked by asking the
@@ -21,6 +23,8 @@ import { checkSession, SESSION_COOKIE } from "@/lib/session";
 
 const LOGIN_PATH = "/login";
 const CHANGE_PASSWORD_PATH = "/change-password";
+// Visitors see this page at "/"; it lives outside (app) so it needs no session
+const LANDING_PATH = "/welcome";
 
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
@@ -40,14 +44,19 @@ export async function proxy(request: NextRequest) {
       const next = safeNextPath(request.nextUrl.searchParams.get("next"));
       return redirectTo(canAccessPath(next, session.user.role) ? next : "/");
     }
+    if (pathname === LANDING_PATH) return redirectTo("/");
     if (!canAccessPath(pathname, session.user.role)) return redirectTo("/");
     return NextResponse.next();
   }
 
   // Not signed in (or we cannot tell: fail closed).
   let response: NextResponse;
-  if (pathname === LOGIN_PATH) {
+  if (pathname === LOGIN_PATH || pathname === LANDING_PATH) {
     response = NextResponse.next();
+  } else if (pathname === "/") {
+    // A rewrite, not a redirect: the address stays "/", and signing in then
+    // turns the same URL into the dashboard
+    response = NextResponse.rewrite(new URL(LANDING_PATH, request.url));
   } else {
     const loginUrl = new URL(LOGIN_PATH, request.url);
     const next = pathname + search;

@@ -33,12 +33,14 @@ No tests exist yet. A change is done when `lint` and `tsc` pass. For UI changes,
 src/proxy.ts                 auth gate for every page (Next 16 "proxy", formerly middleware); /api excluded
 src/app/layout.tsx           root layout, Geist fonts, metadata template "%s · Flabsheet"
 src/app/(app)/               signed-in pages; layout.tsx renders <TopNav/> inside <Suspense>
+src/app/(app)/page.tsx       "/" when signed in: role dashboard (components/home/: student progress and rank, staff course state + quick links)
+src/app/welcome              public landing page; proxy.ts rewrites "/" to it for signed-out visitors (components/landing/)
 src/app/login, change-password   signed-out/account pages (wrapped in <AuthShell>, no top nav)
 src/app/api/<path>/route.ts  thin forwarders: `return forwardToBackend(request, "/<path>")`
 src/components/ui/           shadcn-generated primitives (badge, button, card, dialog, dropdown-menu, input, label, select,
                              sonner, switch, table, tabs, textarea)
 src/components/data-table/   <DataTable>: the shared TanStack Table v9 table (sorting, search, client-side pages; `serverPages` for a list paged by the backend)
-src/components/<feature>/    feature components (accounts/, auth/, leaderboard/, logs/, nav/, problems/, progress/, staff/, students/, solve/, submissions/, settings/,
+src/components/<feature>/    feature components (accounts/, auth/, home/, landing/, leaderboard/, logs/, nav/, problems/, progress/, staff/, students/, solve/, submissions/, settings/,
                              theme/)
 src/app/(app)/manage/problems  staff problem list, /new (title + slug), /[id] (editor)
 src/app/(app)/problems       /problems (list with own scores), /[slug] (statement, editor, submit, live result, history;

@@ -2,7 +2,7 @@
 
 import { ChevronDownIcon, UserIcon } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useLayoutEffect, useState } from "react";
 
 import {
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ApiError, logout, type User } from "@/lib/api";
 import { ROLE_LABELS } from "@/lib/navigation";
-import { notifySuccess } from "@/lib/notify";
+import { markSignedOut } from "@/lib/signed-out";
 
 /** The signed-in user in the top bar: opens a menu with Change password and Log out. */
 export function AccountMenu({
@@ -22,16 +22,14 @@ export function AccountMenu({
 }: {
   user: Pick<User, "display_name" | "login_id" | "role">;
 }) {
-  const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
 
-  // The router keeps the app layout mounted (hidden) while on /login, so
-  // without this a user who signs back in finds the menu still open on
-  // "Logging out…". The cleanup runs when the layout is hidden and on every
-  // navigation between app pages.
+  // The router keeps the app layout mounted (hidden) on pages outside it,
+  // so without this the menu could come back still open. The cleanup runs
+  // when the layout is hidden and on every navigation between app pages.
   useLayoutEffect(() => {
     return () => {
       setOpen(false);
@@ -53,8 +51,12 @@ export function AccountMenu({
         return;
       }
     }
-    router.replace("/login");
-    notifySuccess("Signed out.");
+    // A full page load, not router.replace: "/" is the same URL as the
+    // dashboard, so the client router would show its cached copy instead of
+    // letting proxy.ts serve the landing page. It also drops every page the
+    // router kept mounted for the signed-out user.
+    markSignedOut();
+    window.location.replace("/");
   }
 
   const role = ROLE_LABELS[user.role];
