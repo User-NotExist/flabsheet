@@ -210,4 +210,10 @@
   .markdown hr {
     @apply my-5;
   }
+  /* KaTeX draws underlines, overlines, fraction bars and array rules as
+     borders but never sets their colour, so the base `* { border-border }`
+     rule turns them into a faint grey line. Make them follow the text. */
+  .markdown .katex * {
+    border-color: currentColor;
+  }
 }
