@@ -141,14 +141,31 @@ jobs:
           curl --fail --silent --show-error --output /dev/null --retry 30 --retry-delay 2 \
             --retry-connrefused --retry-all-errors http://127.0.0.1:3000/login
 
-      # No backend runs in this job, so src/proxy.ts must fail closed.
+      # No backend runs in this job, so src/proxy.ts must fail closed. `/` is
+      # the exception: signed-out visitors get the landing page there.
       - name: Check auth gate redirects
         run: |
+          status=$(curl --silent --show-error --output /dev/null \
+            --write-out '%{http_code}' http://127.0.0.1:3000/)
+          echo "/ answers: $status"
+          [ "$status" = 200 ]
+
+          # No cookie: checkSession answers "invalid" without asking the backend
           location=$(curl --silent --show-error --output /dev/null \
-            --write-out '%{redirect_url}' http://127.0.0.1:3000/)
-          echo "/ redirects to: $location"
+            --write-out '%{redirect_url}' http://127.0.0.1:3000/problems)
+          echo "/problems redirects to: $location"
           case "$location" in
-            */login*) ;;
+            */login\?next=%2Fproblems) ;;
+            *) exit 1 ;;
+          esac
+
+          # With a cookie the backend must be asked; it is unreachable here
+          location=$(curl --silent --show-error --output /dev/null \
+            --cookie 'flabsheet_session=ci-dummy' \
+            --write-out '%{redirect_url}' http://127.0.0.1:3000/problems)
+          echo "/problems (with cookie) redirects to: $location"
+          case "$location" in
+            */login\?next=%2Fproblems\&reason=unavailable) ;;
             *) exit 1 ;;
           esac
 
