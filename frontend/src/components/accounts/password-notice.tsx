@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { notifySuccess } from "@/lib/notify";
 
 type Account = { login_id: string; display_name: string };
 
@@ -27,6 +28,7 @@ export function PasswordNotice({
       await navigator.clipboard.writeText(password);
       setCopied(true);
       setCopyError(false);
+      notifySuccess("Password copied.");
     } catch {
       setCopyError(true);
     }

@@ -8,6 +8,7 @@ import { FormError } from "@/components/auth/form-error";
 import { CodeEditor } from "@/components/problems/code-editor";
 import { formatScore, formatWhen } from "@/components/submissions/format";
 import { LiveStatus } from "@/components/submissions/live-status";
+import { notifyJudged } from "@/components/submissions/notify-judged";
 import { ResultReport, resultNotice } from "@/components/submissions/result-report";
 import { VerdictBadge } from "@/components/submissions/verdict-badge";
 import { WhitespaceToggle } from "@/components/submissions/whitespace-text";
@@ -22,6 +23,7 @@ import {
   type SubmissionProgress,
 } from "@/lib/api";
 import { writeDraft, writeLanguage } from "@/lib/drafts";
+import { notifyError, notifySuccess } from "@/lib/notify";
 import { useSubmissionProgress } from "@/lib/sse";
 import { useApiError } from "@/lib/use-api-error";
 
@@ -102,7 +104,10 @@ export function SubmissionView() {
   const judging = submission !== null && !isFinalStatus(submission.status);
   useSubmissionProgress(judging ? id : null, (update) => {
     setProgress(update);
-    if (isFinalStatus(update.status)) load();
+    if (isFinalStatus(update.status)) {
+      load();
+      notifyJudged(update);
+    }
   });
 
   if (error && !submission) {
@@ -129,7 +134,6 @@ export function SubmissionView() {
   async function judgeAgain() {
     if (!submission) return;
     setSending(true);
-    setError(null);
     try {
       const again =
         submission.status === "delayed"
@@ -139,8 +143,13 @@ export function SubmissionView() {
       setProgress(null);
       setSubmission({ ...submission, status: again.status, attempt: again.attempt, results: [] });
       load();
+      notifySuccess(
+        submission.status === "delayed"
+          ? `Submission #${submission.id} is back in the queue.`
+          : `Rejudging submission #${submission.id}.`,
+      );
     } catch (err) {
-      setError(toMessage(err));
+      notifyError(toMessage(err));
     } finally {
       setSending(false);
     }
@@ -155,8 +164,9 @@ export function SubmissionView() {
       writeDraft(user.id, problem.slug, submission.language.id, submission.source);
       writeLanguage(user.id, problem.slug, submission.language.id);
       router.push(`/problems/${problem.slug}`);
+      notifySuccess("Loaded this code into the editor.");
     } catch (err) {
-      setError(toMessage(err));
+      notifyError(toMessage(err));
     }
   }
 

@@ -6,6 +6,7 @@ import { FormError } from "@/components/auth/form-error";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ApiError, importStudents } from "@/lib/api";
+import { notifySuccess } from "@/lib/notify";
 import { useApiError } from "@/lib/use-api-error";
 
 export function StudentImport({ onImported }: { onImported: () => void }) {
@@ -15,7 +16,6 @@ export function StudentImport({ onImported }: { onImported: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [download, setDownload] = useState<Blob | null>(null);
-  const [saved, setSaved] = useState(false);
   const request = useRef(0);
 
   useLayoutEffect(() => () => {
@@ -24,7 +24,6 @@ export function StudentImport({ onImported }: { onImported: () => void }) {
     setFile(null);
     setError(null);
     setPending(false);
-    setSaved(false);
     setPreview("");
   }, []);
 
@@ -45,7 +44,6 @@ export function StudentImport({ onImported }: { onImported: () => void }) {
     setFile(selected);
     setPreview("");
     setError(null);
-    setSaved(false);
   }
 
   async function submit() {
@@ -59,6 +57,7 @@ export function StudentImport({ onImported }: { onImported: () => void }) {
       setDownload(csv);
       setFile(null);
       onImported();
+      notifySuccess("Students imported.");
     } catch (err) {
       if (id === request.current) {
         setError(err instanceof ApiError && err.code === "csv_invalid"
@@ -80,7 +79,7 @@ export function StudentImport({ onImported }: { onImported: () => void }) {
     // Give the browser time to open the blob before discarding the one-time download.
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     setDownload(null);
-    setSaved(true);
+    notifySuccess("Password CSV download started.");
   }
 
   return (
@@ -121,7 +120,6 @@ export function StudentImport({ onImported }: { onImported: () => void }) {
           <Button onClick={savePasswords}>Download passwords CSV</Button>
         </>
       )}
-      {saved && <p role="status" className="text-success-foreground">Password CSV download started.</p>}
     </section>
   );
 }

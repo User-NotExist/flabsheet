@@ -18,6 +18,7 @@ import {
   setProblemState,
   type ProblemListItem,
 } from "@/lib/api";
+import { notifyError, notifySuccess } from "@/lib/notify";
 import { useApiError } from "@/lib/use-api-error";
 
 const POLL_MS = 5000; // only while a build is pending
@@ -103,7 +104,6 @@ export function ProblemList() {
   const toggle = useCallback(
     async (problem: ProblemListItem, enable: boolean) => {
       setTogglingId(problem.id);
-      setError(null);
       try {
         const detail = await setProblemState(
           problem.id,
@@ -117,8 +117,13 @@ export function ProblemList() {
                 : item,
             ) ?? null,
         );
+        notifySuccess(
+          enable
+            ? `“${problem.title}” is now visible to students.`
+            : `“${problem.title}” is now hidden from students.`,
+        );
       } catch (err) {
-        setError(toMessage(err));
+        notifyError(toMessage(err));
       } finally {
         setTogglingId(null);
       }

@@ -16,6 +16,7 @@ import {
   shortLanguage,
 } from "@/components/submissions/format";
 import { LiveStatus } from "@/components/submissions/live-status";
+import { notifyJudged } from "@/components/submissions/notify-judged";
 import { ResultReport, resultNotice } from "@/components/submissions/result-report";
 import { VerdictBadge } from "@/components/submissions/verdict-badge";
 import { WhitespaceText, WhitespaceToggle } from "@/components/submissions/whitespace-text";
@@ -52,6 +53,7 @@ import {
   type SubmissionProgress,
 } from "@/lib/api";
 import { readDraft, readLanguage, writeDraft, writeLanguage } from "@/lib/drafts";
+import { notifyError, notifySuccess } from "@/lib/notify";
 import { useSubmissionProgress } from "@/lib/sse";
 import { useApiError } from "@/lib/use-api-error";
 
@@ -130,7 +132,6 @@ export function SolvePage() {
   const [source, setSource] = useState("");
   const [draftSaved, setDraftSaved] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [cooling, setCooling] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -141,7 +142,6 @@ export function SolvePage() {
   // The router keeps this page mounted (hidden) after navigating away
   useLayoutEffect(() => {
     return () => {
-      setError(null);
       setSubmitting(false);
       setConfirmOpen(false);
       setCooling(false);
@@ -207,7 +207,10 @@ export function SolvePage() {
   const judging = latest !== null && !isFinalStatus(latest.status);
   useSubmissionProgress(judging ? latest.id : null, (update) => {
     setProgress(update);
-    if (isFinalStatus(update.status)) reload(update.id);
+    if (isFinalStatus(update.status)) {
+      reload(update.id);
+      notifyJudged(update);
+    }
   });
 
   if (loadError) {
@@ -274,19 +277,18 @@ export function SolvePage() {
   }
 
   async function loadSubmission(id: number) {
-    setError(null);
     try {
       const submission = await getSubmission(id, { studentView: true });
       loadCode(submission.language.id, submission.source);
+      notifySuccess(`Loaded the code of submission #${id} into the editor.`);
     } catch (err) {
-      setError(toMessage(err));
+      notifyError(toMessage(err));
     }
   }
 
   async function submit() {
     setConfirmOpen(false);
     setSubmitting(true);
-    setError(null);
     try {
       const submission = await submitSolution(slug, language, source);
       setLatest(submission);
@@ -295,10 +297,11 @@ export function SolvePage() {
       setCooling(true);
       clearTimeout(coolTimer.current);
       coolTimer.current = setTimeout(() => setCooling(false), SUBMIT_INTERVAL_MS);
+      notifySuccess(`Submission #${submission.id} sent. Judging has started.`);
     } catch (err) {
       // The killswitch was turned on since the last refresh: show the banner now
       if (err instanceof ApiError && err.code === "submissions_closed") refreshSettings();
-      setError(toMessage(err));
+      notifyError(toMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -455,7 +458,6 @@ export function SolvePage() {
                     : "Your latest submission sets your score, even if it is lower.")}
               </p>
             </div>
-            <FormError message={error} />
           </section>
 
           {latest && (
