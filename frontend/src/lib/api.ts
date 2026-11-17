@@ -83,7 +83,7 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
  * (the browser then sets the multipart Content-Type itself).
  */
 async function send(
-  method: "POST" | "PATCH" | "DELETE",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<Response> {
@@ -487,6 +487,22 @@ export type InstanceSettings = {
 
 export async function getInstanceSettings(): Promise<InstanceSettings> {
   return (await request("/settings")).json();
+}
+
+/**
+ * Admin only: turns the submission killswitch on (`open` false) or off. The
+ * message is shown in the banner while closed; the backend drops it on reopen.
+ */
+export async function setSubmissionsOpen(
+  open: boolean,
+  message?: string,
+): Promise<InstanceSettings> {
+  return (
+    await send("PUT", "/admin/settings/submissions", {
+      submissions_open: open,
+      submissions_message: message ?? null,
+    })
+  ).json();
 }
 
 export type ServerTime = {
