@@ -54,6 +54,7 @@ import {
   type Language,
   type ProblemDetail,
 } from "@/lib/api";
+import { notifyError, notifySuccess } from "@/lib/notify";
 import { useApiError } from "@/lib/use-api-error";
 
 const BUILD_POLL_MS = 2000;
@@ -102,7 +103,6 @@ export function ProblemEditor() {
   const [form, setForm] = useState<EditorForm | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [action, setAction] = useState<Action | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rejudgeOpen, setRejudgeOpen] = useState(false);
@@ -113,7 +113,6 @@ export function ProblemEditor() {
     return () => {
       setAction(null);
       setError(null);
-      setNotice(null);
       setConfirmOpen(false);
     };
   }, []);
@@ -153,7 +152,13 @@ export function ProblemEditor() {
         if (cancelled) return;
         if (state.build?.status === "pending" && state.version === pendingVersion) return;
         const detail = await getProblem(id);
-        if (!cancelled) setServer(detail);
+        if (cancelled) return;
+        setServer(detail);
+        const built = detail.version?.build.status;
+        if (built === "ok") notifySuccess(`Version ${detail.version!.version} built.`);
+        else if (built === "failed") {
+          notifyError(`The build of version ${detail.version!.version} failed.`);
+        }
       } catch {
         // A missed poll is retried by the next tick
       }
@@ -220,15 +225,19 @@ export function ProblemEditor() {
   );
   const canDelete = server.student_submission_count === 0;
 
-  /** Runs one server action with the shared pending and error handling. */
+  /**
+   * Runs one server action with the shared pending and error handling. A
+   * failed save stays on the page next to the form, like its validation
+   * errors; any other action reports in a toast.
+   */
   async function run(name: Action, work: () => Promise<void>) {
     setAction(name);
     setError(null);
-    setNotice(null);
     try {
       await work();
     } catch (err) {
-      setError(toMessage(err));
+      if (name === "save") setError(toMessage(err));
+      else notifyError(toMessage(err));
     } finally {
       setAction(null);
     }
@@ -260,7 +269,7 @@ export function ProblemEditor() {
       setServer(detail);
       if (parsed) {
         setForm(formFromDetail(detail, languages));
-        setNotice(
+        notifySuccess(
           detail.version && detail.version.version > previousVersion
             ? `Saved. Version ${detail.version.version} is building.`
             : "Saved.",
@@ -273,7 +282,7 @@ export function ProblemEditor() {
           slug: detail.slug,
           statement: detail.statement_md,
         });
-        setNotice(
+        notifySuccess(
           "Saved the title and statement. Settings, reference solution and tests are saved together once there is a reference solution and at least one test.",
         );
       }
@@ -285,9 +294,11 @@ export function ProblemEditor() {
       if (canDelete) {
         await deleteProblem(id);
         router.replace("/manage/problems");
+        notifySuccess("Problem deleted.");
       } else {
         setServer(await setProblemState(id, "archive"));
         setConfirmOpen(false);
+        notifySuccess("Problem archived.");
       }
     });
   }
@@ -297,7 +308,7 @@ export function ProblemEditor() {
       try {
         const { rejudged, skipped } = await rejudgeProblem(id, rejudgeScope);
         setServer(await getProblem(id));
-        setNotice(
+        notifySuccess(
           `Rejudging ${rejudged} submission${rejudged === 1 ? "" : "s"} on version ${server!.current_version}.` +
             (skipped > 0
               ? ` ${skipped} kept ${skipped === 1 ? "its" : "their"} old result: this version does not allow ${skipped === 1 ? "its" : "their"} language.`
@@ -354,12 +365,7 @@ export function ProblemEditor() {
         </p>
       )}
       <FormError message={error} />
-      {notice && (
-        <p role="status" className="text-sm text-muted-foreground">
-          {notice}
-        </p>
-      )}
-      {dirty && !notice && !error && (
+      {dirty && !error && (
         <p className="text-sm text-muted-foreground">You have unsaved changes.</p>
       )}
 
@@ -599,6 +605,7 @@ export function ProblemEditor() {
             onRebuild={() =>
               run("rebuild", async () => {
                 setServer(await rebuildProblem(id));
+                notifySuccess("Rebuild started.");
               })
             }
           />
@@ -617,6 +624,11 @@ export function ProblemEditor() {
                 onCheckedChange={(checked) =>
                   run("toggle", async () => {
                     setServer(await setProblemState(id, checked ? "enable" : "disable"));
+                    notifySuccess(
+                      checked
+                        ? "The problem is now visible to students."
+                        : "The problem is now hidden from students.",
+                    );
                   })
                 }
               />

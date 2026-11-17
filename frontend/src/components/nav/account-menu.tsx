@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ApiError, logout, type User } from "@/lib/api";
 import { ROLE_LABELS } from "@/lib/navigation";
+import { notifySuccess } from "@/lib/notify";
 
 /** The signed-in user in the top bar: opens a menu with Change password and Log out. */
 export function AccountMenu({
@@ -53,6 +54,7 @@ export function AccountMenu({
       }
     }
     router.replace("/login");
+    notifySuccess("Signed out.");
   }
 
   const role = ROLE_LABELS[user.role];

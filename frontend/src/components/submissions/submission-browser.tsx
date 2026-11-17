@@ -30,6 +30,7 @@ import {
   type SubmissionStatus,
   submissionsCsvUrl,
 } from "@/lib/api";
+import { notifyError, notifySuccess } from "@/lib/notify";
 import { useApiError } from "@/lib/use-api-error";
 
 const PAGE_SIZE = 50;
@@ -142,10 +143,14 @@ export function SubmissionBrowser() {
       setSending(item.id);
       try {
         await (item.status === "delayed" ? requeueSubmission : rejudgeSubmission)(item.id);
-        setError(null);
         setRevision((r) => r + 1);
+        notifySuccess(
+          item.status === "delayed"
+            ? `Submission #${item.id} is back in the queue.`
+            : `Rejudging submission #${item.id}.`,
+        );
       } catch (err) {
-        setError(toMessage(err));
+        notifyError(toMessage(err));
       } finally {
         setSending(null);
       }
@@ -250,7 +255,12 @@ export function SubmissionBrowser() {
             <h1 className="text-xl font-semibold tracking-tight">Submissions</h1>
             <p className="mt-1 text-muted-foreground">Every submission, newest first. Open one to see its source and full results.</p>
           </div>
-          <a href={submissionsCsvUrl(filters)} download className={buttonVariants({ variant: "outline" })}>
+          <a
+            href={submissionsCsvUrl(filters)}
+            download
+            className={buttonVariants({ variant: "outline" })}
+            onClick={() => notifySuccess("Export started. The CSV file will download shortly.")}
+          >
             Export this list as CSV
           </a>
         </header>
