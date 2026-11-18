@@ -3,7 +3,7 @@
 A programming-course platform for students, staff and admins: problems, submissions, progress and a leaderboard.
 
 ```
-browser ──► frontend (Next.js :3000) ──/api/*──► backend (FastAPI :8000) ──► PostgreSQL
+browser ──► frontend (Next.js :3000) ──/api/*──► backend (FastAPI :8000) ──► PostgreSQL, MongoDB
                                                    worker (arq)          ──► Redis, RustFS (S3)
 judge-worker-go ◄── Redis Streams / RustFS ──► backend /internal/* (events)
 ```
@@ -32,7 +32,7 @@ cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 ```
 
-Replace every `change-me` value. You can generate secrets with `openssl rand -hex 24`. Under Compose, the database, Redis and S3 addresses and keys in `backend/.env` are overridden from the root `.env`, so the passwords only need to be set once.
+Replace every `change-me` value. You can generate secrets with `openssl rand -hex 24`. Under Compose, the database, MongoDB, Redis and S3 addresses and keys in `backend/.env` are overridden from the root `.env`, so the passwords only need to be set once.
 
 ## Development
 
@@ -99,7 +99,7 @@ docker compose -f compose.dev.yaml -f compose.dev.judge.yaml up -d --build judge
 
 ### Running the backend or frontend on the host
 
-Start only the data services (PostgreSQL, Redis, RustFS), then run the apps directly. In this mode the `localhost` URLs in `backend/.env` are used, so their passwords must match the root `.env`.
+Start only the data services (PostgreSQL, MongoDB, Redis, RustFS), then run the apps directly. In this mode the `localhost` URLs in `backend/.env` are used, so their passwords must match the root `.env`.
 
 ```sh
 docker compose -f infra/compose.yaml --env-file .env up -d
@@ -121,7 +121,7 @@ bun run dev                             # http://localhost:3000
 
 ## Production
 
-`compose.prod.yaml` runs PostgreSQL, Redis, RustFS, the backend, the worker and the frontend on the app server. The judge runs on separate, dedicated hosts.
+`compose.prod.yaml` runs PostgreSQL, MongoDB, Redis, RustFS, the backend, the worker and the frontend on the app server. The judge runs on separate, dedicated hosts.
 
 ### 1. Configure
 
@@ -149,7 +149,7 @@ The backend creates the database schema at startup, and `storage-init` creates t
 
 ### 3. Reverse proxy
 
-Serve the frontend (`127.0.0.1:3000`) over TLS. The backend (`127.0.0.1:8000`) only needs to be reachable by judge hosts, for `/internal/*`. The proxy must **refuse `/internal/*` from the public internet** and pass it only from the judge network. Don't expose RustFS or PostgreSQL publicly.
+Serve the frontend (`127.0.0.1:3000`) over TLS. The backend (`127.0.0.1:8000`) only needs to be reachable by judge hosts, for `/internal/*`. The proxy must **refuse `/internal/*` from the public internet** and pass it only from the judge network. Don't expose RustFS, PostgreSQL or MongoDB publicly.
 
 ### 4. Judge hosts
 
@@ -165,6 +165,13 @@ Each judge host runs the go-judge and judge-worker pair from the judge repositor
 ```sh
 git pull
 docker compose -f compose.prod.yaml up -d --build
+```
+
+Upgrading from a version without MongoDB: set `MONGO_ROOT_PASSWORD` in `.env` first, then after the update copy the old log and results, check them, and drop the old Postgres data (see `docs/data-and-storage.md`):
+
+```sh
+docker compose -f compose.prod.yaml exec backend python cli.py migrate-to-mongo
+docker compose -f compose.prod.yaml exec backend python cli.py migrate-to-mongo --drop-old
 ```
 
 ## More documentation

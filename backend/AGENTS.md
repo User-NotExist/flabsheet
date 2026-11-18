@@ -2,7 +2,7 @@
 
 **Never read `backend/.env`.** Use `.env.example` and `config.py` to see which settings exist. Also read the root [AGENTS.md](../AGENTS.md).
 
-FastAPI service, Python 3.12, managed with **uv**. It uses sync SQLAlchemy 2.x (psycopg 3) on PostgreSQL and sync redis-py. Passwords are hashed with argon2. RustFS/S3 goes through sync `boto3` (`services/storage.py`). Background jobs run in a second process, an **arq** worker (`worker.py`).
+FastAPI service, Python 3.12, managed with **uv**. It uses sync SQLAlchemy 2.x (psycopg 3) on PostgreSQL, sync pymongo on MongoDB (the operation log and the submission reports only) and sync redis-py. Passwords are hashed with argon2. RustFS/S3 goes through sync `boto3` (`services/storage.py`). Background jobs run in a second process, an **arq** worker (`worker.py`).
 
 ## Commands
 
@@ -21,16 +21,16 @@ uv run python -m compileall -q .          # quick syntax check
 ## Layout
 
 ```
-main.py                 app, CORS, schema setup at import (CREATE EXTENSION citext + create_all), routers
+main.py                 app, CORS, schema setup at import (CREATE EXTENSION citext + create_all + Mongo ensure_indexes), routers, PyMongoError -> 503
 config.py               pydantic-settings `Settings`; module-level `settings` singleton
-cli.py                  management CLI (argparse subcommands): seed-admin
+cli.py                  management CLI (argparse subcommands): seed-admin, seed-students, migrate-to-mongo (copies the old Postgres log/results; --drop-old drops them after a verified copy)
 db/postgres.py          engine, SessionLocal, Base, get_database() dependency
 db/redis.py             shared redis_client (decode_responses=True, 2 s timeouts), get_redis()
+db/mongo.py             shared mongo_client (2 s timeouts, tz_aware), operation_logs() / submission_reports() collections, ensure_indexes(), mongo_error_handler
 db/models/user.py       User, Session (login sessions), UserRole enum
-db/models/operation_log.py  OperationLog (audit rows)
 db/models/student_import.py StudentImport (bulk import runs; never stores passwords)
 db/models/problem.py    Problem, ProblemVersion, ProblemLanguage, TestCase, Image + ProblemStatus/BuildStatus/TestCaseVisibility enums
-db/models/submission.py Submission, SubmissionResult, JudgeEvent, JudgeOutbox, ProblemScore + SubmissionStatus enum
+db/models/submission.py Submission, JudgeEvent, JudgeOutbox, ProblemScore + SubmissionStatus enum
 db/models/instance_settings.py  InstanceSettings (single row id=1, seeded on table creation) + LeaderboardMode enum
 routers/<area>.py       APIRouter(prefix="/<area>", tags=["<area>"]); request/response Pydantic models live here
 routers/problems.py     /admin/problems (staff, admin): list, editor save, versions, test data and image upload, enable/disable/archive/delete, rebuild, rejudge all submissions
@@ -38,7 +38,7 @@ routers/staff.py        /staff (admin): list staff and admins, create (generated
 routers/images.py       GET /images/{id}: statement images streamed from storage
 routers/solve.py        GET /problems, /problems/{slug} (every role): enabled problems, statement, sample cases; staff preview
 routers/submissions.py  POST /problems/{slug}/submissions, GET /submissions, /submissions/queue (instance-wide queued count), /submissions/{id}, /submissions/{id}/stream (SSE, the one async route)
-routers/logs.py         /admin/logs (admin): the operation log, paged and filtered in SQL (type, user, time range); /admin/logs/types
+routers/logs.py         /admin/logs (admin): the operation log, paged and filtered in MongoDB (type, user via Postgres ids, time range); /admin/logs/types
 routers/settings.py     GET /settings: killswitch state, banner message, leaderboard mode; GET /settings/time: server clock for the top bar;
                         PUT /admin/settings/submissions (admin): turn the killswitch on/off with a message, logged as `settings.killswitch`;
                         PUT /admin/settings/leaderboard (staff, admin): live / hidden / frozen, freezing stores a snapshot
@@ -50,7 +50,8 @@ services/auth.py        current_session / CurrentSession / require_role(...) dep
 services/session.py     session create/lookup/revoke; Postgres is the source of truth, Redis is a read cache
 services/rate_limit.py  Redis rate limits: failed-login counters (per login id, per client IP) and the 10 s submit slot per user
 services/errors.py      ApiError: an HTTPException whose body also carries a machine-readable `code`
-services/operation_log.py  log_operation / log_operation_now
+services/operation_log.py  log_operation / log_operation_now: MongoDB operation_logs, written by an after_commit hook
+services/reports.py     MongoDB submission_reports: one document per attempt with per-test results and the compile log
 services/storage.py     boto3 S3 client: put/get/size/stream, presigned URLs; raises StorageError (503 via main.py)
 services/packages.py    problem.yaml, staging/final package zips, the three build steps (start, record result, assemble)
 services/judge.py       job ids (ULID), Redis stream push, judge_outbox relay, batched send for a rejudge
@@ -67,7 +68,7 @@ Imports are absolute from the backend root (`from db.models.user import User`, `
 
 - **Endpoint**: add it to `routers/<area>.py` (create the file and `app.include_router(...)` in `main.py`). Take the DB as `db: Db` (`Annotated[DbSession, Depends(get_database)]`) and the caller as `session: CurrentSession`. Restrict roles with `dependencies=[Depends(require_role(UserRole.admin))]`. Write handlers as sync `def`, not `async def`, because the whole stack is sync.
 - **Model**: add `db/models/<name>.py` with SQLAlchemy 2.0 typed `Mapped[...]` / `mapped_column(...)`, and **import it in `main.py`** (and `cli.py` if the CLI needs it) so `create_all` sees it. Postgres conventions in use:
-  - `BigInteger` ids: `Identity(always=True)` (`GENERATED ALWAYS AS IDENTITY`). `operation_logs` is the only exception and still uses `autoincrement=True` (`BIGSERIAL`)
+  - `BigInteger` ids: `Identity(always=True)` (`GENERATED ALWAYS AS IDENTITY`)
   - `DateTime(timezone=True)` with `server_default=func.now()`
   - `CITEXT` for case-insensitive identifiers
   - named `CheckConstraint`s (`<table>_<col>_check`)
@@ -83,7 +84,8 @@ Imports are absolute from the backend root (`from db.models.user import User`, `
 - **Login doesn't leak account existence**: it gives the same 401 message for every failure and runs a dummy argon2 verify for unknown users. Keep both properties.
 - **Redis degrades gracefully**: rate limiting fails open, and the session cache falls back to Postgres. The exception is `_cache_delete`, which raises so a revoked session can't stay alive. Wrap new Redis calls in `try/except redis.RedisError` with `logger.warning(..., exc_info=True)`.
 - **Operation log**:
-  - Use `log_operation(db, "area.action", user_id=..., info={...})` inside the operation's transaction (it flushes, and the caller commits).
+  - Use `log_operation(db, "area.action", user_id=..., info={...})` inside the operation's transaction. It queues the entry on the session; an `after_commit` hook writes it to MongoDB, and a rollback or a close without commit discards it. Call it outside `begin_nested()`.
+  - The write is best effort, like Redis: a Mongo failure is logged as a warning and never fails the request that committed.
   - Use `log_operation_now(...)` for events that must persist even when the request fails (failed logins, permission denials).
   - Type names are dotted snake_case (`auth.login_failed`). Never put passwords or tokens in `info`.
 - **Commit order**: commit the DB first, then touch Redis (`cache_session` after `db.commit()`).
@@ -96,6 +98,7 @@ Imports are absolute from the backend root (`from db.models.user import User`, `
 - **`/internal/*` never answers 4xx** except 401 and 409: the judge drops an event on any other 4xx and retries on 5xx.
 - **Student ids never reach other students on the leaderboard**: `routers/leaderboard.py` fills `login_id` only for staff and admins, and marks the caller's row with `is_me` instead of sending user ids (FR-STD-03).
 - **Hidden test data never reaches a student**: `routers/submissions.py` shapes every result per viewer (`_result_out`), and `services/submissions.py` refuses to store output for a hidden case. Check both when you add a field to a result or a new way to read one (NFR-SEC-07).
+- **Submission reports are written before the commit**: in `apply_event`, test results and the compile log go to MongoDB (`services/reports.py`) after the submission lock and the `judge_events` insert, and before `db.commit()`. Every write is an idempotent `$set` on a fixed key, so a failed commit is repaired by the judge's retry, and a Mongo error rolls the event back (503 from `main.py`, the judge retries). Never write a report after the commit or with `$inc`/`$push`. A rejudge needs no Mongo cleanup: the next attempt reads `"{submission_id}:{attempt}"`, a new document.
 - **Judge events are applied exactly once**: `apply_event` locks the submission, answers 409 for an older attempt or another job id, and dedups on `judge_events.event_id` with `ON CONFLICT DO NOTHING ... RETURNING` (the driver's `rowcount` is -1 here, so never test that).
 - **The stream route holds no database connection**: it is `async def`, authenticates in a thread with its own `SessionLocal()`, and must not take `Db` or `CurrentSession` as dependencies.
 
@@ -111,7 +114,7 @@ Imports are absolute from the backend root (`from db.models.user import User`, `
 
 ## Known gaps
 
-- `GET /healthz` (in `main.py`) is the liveness probe used by the production `HEALTHCHECK`. It doesn't check Postgres or Redis. Keep the route and the Dockerfile in sync, because the prod frontend waits for the backend to be `service_healthy`.
+- `GET /healthz` (in `main.py`) is the liveness probe used by the production `HEALTHCHECK`. It doesn't check Postgres, MongoDB or Redis. Keep the route and the Dockerfile in sync, because the prod frontend waits for the backend to be `service_healthy`.
 - There are no tests (deferred until after the MVP, see `docs/backend.md`).
 - Migrations (Alembic) are also deferred.
 - Problems: SVG images (FR-PRB-06, needs a sanitiser) are not built.

@@ -352,7 +352,7 @@ export function LogViewer() {
               label="Operation log"
               data={loaded?.page.items ?? null}
               columns={columns}
-              getRowId={(entry) => String(entry.id)}
+              getRowId={(entry) => entry.id}
               serverPages={{
                 total,
                 pageIndex: query.pageIndex,

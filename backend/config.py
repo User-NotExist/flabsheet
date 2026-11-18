@@ -15,6 +15,9 @@ class Settings(BaseSettings):
 
     postgres_url: str
     redis_url: str
+    # MongoDB holds the operation log and the submission reports
+    mongo_url: str
+    mongo_db: str = "flabsheet"
     frontend_url: str = "http://localhost:3000"
     database_echo: bool = False
 

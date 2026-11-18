@@ -1,6 +1,6 @@
 # Database and object storage
 
-PostgreSQL is the system of record for every user, problem, submission and score; RustFS holds the files those rows point to, addressed by key and checked by SHA-256. Redis holds only rebuildable data and is not covered here.
+PostgreSQL is the system of record for every user, problem, submission and score; MongoDB holds two kinds of data that are written once per event and read as a whole, the operation log and the per-test submission reports; RustFS holds the files those rows point to, addressed by key and checked by SHA-256. Redis holds only rebuildable data and is not covered here.
 
 ## Entity relationships
 
@@ -9,10 +9,14 @@ sessions ──▶ users ◀── problems ◀── images
 problem_scores ──▶ users            problems ◀── problem_versions ◀── problem_languages
 problem_scores ──▶ submissions      problem_versions ◀── test_cases
 submissions ──▶ users, problems, problem_versions
-submission_results ──▶ submissions, test_cases
 judge_events ──▶ submissions
-Supporting: judge_outbox, instance_settings (1 row), operation_logs, student_imports
+Supporting: judge_outbox, instance_settings (1 row), student_imports
 (arrow = foreign key, child ──▶ parent)
+
+MongoDB (no foreign keys; the ids refer to Postgres rows):
+operation_logs.user_id ··▶ users
+submission_reports.submission_id, problem_id, user_id ··▶ submissions, problems, users
+submission_reports.results.<test_case_id> ··▶ test_cases
 ```
 
 A problem changes only through new versions, and each submission records the version it was judged against, so old results stay explainable after edits. Two shortcut keys are left out of the drawing for clarity: `submissions.problem_id` and `problem_scores.problem_id` both point at `problems`.
@@ -157,27 +161,12 @@ CREATE TABLE submissions (
   verdict_unknown    boolean NOT NULL DEFAULT false,
   score_milli        int,
   judge_reason       text,                           -- done.reason for SE / JE
-  compile_log        text,
   attempt            int    NOT NULL DEFAULT 1,
   job_id             text   NOT NULL UNIQUE,         -- ULID; replaced by a new one on every rejudge
   lane               text   NOT NULL DEFAULT 'practice',
   created_at         timestamptz NOT NULL DEFAULT now(),
   started_at         timestamptz,
   finished_at        timestamptz
-);
-
-CREATE TABLE submission_results (
-  submission_id     bigint NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
-  test_case_id      bigint NOT NULL REFERENCES test_cases(id),
-  attempt           int    NOT NULL,
-  verdict           text   NOT NULL,
-  time_ms           int,
-  memory_kb         int,
-  fraction          numeric(7,6),
-  checker_msg       text,                            -- ≤ 1 KiB from the judge
-  output_preview    text,                            -- sample and visible cases only
-  preview_truncated boolean NOT NULL DEFAULT false,
-  PRIMARY KEY (submission_id, test_case_id)          -- rows of an older attempt are cleared
 );
 
 CREATE TABLE judge_events (
@@ -211,7 +200,7 @@ CREATE TABLE problem_scores (
   PRIMARY KEY (user_id, problem_id)
 );
 
--- Instance and audit -----------------------------------------------------------
+-- Instance ---------------------------------------------------------------------
 CREATE TABLE instance_settings (
   id                    smallint PRIMARY KEY DEFAULT 1 CHECK (id = 1),
   submissions_open      boolean NOT NULL DEFAULT true,
@@ -223,16 +212,21 @@ CREATE TABLE instance_settings (
   updated_at            timestamptz NOT NULL DEFAULT now()
 );
 INSERT INTO instance_settings DEFAULT VALUES;
-
--- The audit log. Written through services/operation_log.py.
-CREATE TABLE operation_logs (
-  id         bigserial PRIMARY KEY,
-  created_at timestamptz DEFAULT now(),
-  user_id    bigint REFERENCES users(id) ON DELETE SET NULL,  -- who did it; NULL for system events
-  type       text NOT NULL,                          -- dotted snake_case: auth.login_failed, user.create, problem.enable, settings.killswitch
-  info       text                                    -- JSON text with the details (target ids, IP); never passwords or tokens
-);
 ```
+
+The operation log, the per-test results and the compile log used to be the tables `operation_logs` and `submission_results` and the column `submissions.compile_log`; they now live in MongoDB (section "MongoDB" below). A database created by an older version still has them, and `create_all` never drops anything:
+
+1. `python cli.py migrate-to-mongo` copies them into MongoDB and verifies the copy. It never changes Postgres and is safe to run again.
+2. Check the log page and a few result pages.
+3. `python cli.py migrate-to-mongo --drop-old` (asks first; `--yes` skips the prompt) copies again, then in one Postgres transaction locks the old data, copies once more, verifies that every row is in MongoDB and runs:
+
+```sql
+DROP TABLE IF EXISTS submission_results;
+DROP TABLE IF EXISTS operation_logs;
+ALTER TABLE submissions DROP COLUMN IF EXISTS compile_log;
+```
+
+If any row is missing nothing is dropped. The lock waits at most 5 s for the live app's transactions and blocks submits for the few seconds the final pass takes.
 
 The first draft of this schema was checked by running it on PostgreSQL 16.15 together with the indexes below and a smoke test of the rules in the next section. It has not been re-run since `max_points` moved to `problem_versions` and `audit_log` was replaced by `operation_logs`; the Compose image is pinned to PostgreSQL 16.4.
 
@@ -251,7 +245,6 @@ CREATE INDEX judge_events_submission_idx  ON judge_events (submission_id);
 CREATE INDEX judge_outbox_unsent_idx      ON judge_outbox (created_at) WHERE sent_at IS NULL;
 CREATE INDEX sessions_user_idx            ON sessions (user_id) WHERE revoked_at IS NULL;
 CREATE INDEX sessions_expiry_idx          ON sessions (expires_at);
-CREATE INDEX operation_logs_created_at_idx ON operation_logs (created_at DESC);
 ```
 
 | Index | Serves |
@@ -264,7 +257,6 @@ CREATE INDEX operation_logs_created_at_idx ON operation_logs (created_at DESC);
 | `problem_scores_problem_idx` | Progress matrix and exports (the PK already covers per-user reads) |
 | `judge_outbox_unsent_idx` | `flush_outbox` job |
 | `sessions_*` | Revoke all of a user's sessions; purge expired sessions |
-| `operation_logs_created_at_idx` | Newest-first log listing |
 
 A problem's versions are found through the unique index on `(problem_id, version)`, so `problem_versions` needs no index of its own.
 
@@ -300,6 +292,61 @@ ON CONFLICT (user_id, problem_id) DO UPDATE
 
 Skip the call entirely for SE and JE results, so they never replace a score (FR-JDG-06).
 
+## MongoDB
+
+A standalone MongoDB 8.0 server (`infra/compose.yaml`, database `MONGO_DB`, default `flabsheet`) holds two collections. Every write touches one document, so no replica set or multi-document transaction is needed. `db/mongo.py` creates the indexes at startup (`ensure_indexes`, next to `create_all`).
+
+### `operation_logs`
+
+One document per audit event, written through `services/operation_log.py`.
+
+```js
+{
+  _id:        ObjectId,           // also the tie-break for equal created_at
+  created_at: ISODate,            // set by the backend when the event is logged
+  type:       "auth.login_failed",// dotted snake_case: auth.login, user.create, problem.enable, settings.killswitch
+  user_id:    42 | null,          // users.id of who did it; null for system events
+  info:       { ip: "…" } | "text" | null,  // details (target ids, IP); never passwords or tokens
+  legacy_id:  1234                // only on entries copied from the old Postgres table
+}
+```
+
+| Index | Serves |
+| --- | --- |
+| `{created_at: -1, _id: -1}` | Newest-first log listing |
+| `{type: 1, created_at: -1}` | Filter by type |
+| `{user_id: 1, created_at: -1}` | Filter by user (ids found in Postgres by login id or name) |
+| `{legacy_id: 1}` unique, partial | `migrate-to-mongo` can run twice |
+
+**Write rule:** `log_operation(db, …)` queues the entry on the SQLAlchemy session and an `after_commit` hook inserts it, so an operation that rolls back leaves no entry. The insert is best effort, like Redis: while MongoDB is down the entry is lost with a warning and the request still succeeds. `log_operation_now` inserts at once, for entries that must outlive a failed request.
+
+### `submission_reports`
+
+One document per submission attempt, written by `apply_event` through `services/reports.py`.
+
+```js
+{
+  _id:           "123:2",         // "{submission_id}:{attempt}"
+  submission_id: 123, attempt: 2, problem_id: 7, user_id: 42,
+  compile_log:   "…" | null,      // ≤ 64 KiB, from the `compiled` event
+  updated_at:    ISODate,
+  results: {                      // keyed by test_cases.id
+    "45": { verdict: "AC", time_ms: 12, memory_kb: 3400, fraction: 1.0,
+            checker_msg: "…",            // ≤ 1 KiB from the judge
+            output_preview: "…" | null,  // sample and visible cases only (NFR-SEC-07)
+            preview_truncated: false }
+  }
+}
+```
+
+| Index | Serves |
+| --- | --- |
+| `_id` | Result page and live progress: the current attempt by key |
+| `{submission_id: 1, attempt: -1}` | All attempts of one submission |
+| `{problem_id: 1}` | Deleting a problem's reports |
+
+**Write rule:** `apply_event` locks the submission and inserts the `judge_events` row, writes the document, and only then commits Postgres. Each write is an idempotent `$set` on a fixed key (`results.<test_case_id>`, `compile_log`), so a failed commit is repaired by the judge's retry, and a MongoDB error rolls the event back (503, the judge retries). A rejudge starts a new attempt and therefore a new document; readers always ask for `submissions.attempt`, and older attempts stay as history. Deleting a problem removes its reports after the commit, best effort.
+
 ## Object storage
 
 Two RustFS buckets hold every file; the browser never gets storage credentials or storage URLs, and the judge gets only a read-only key for `problems` plus short-lived presigned URLs.
@@ -323,7 +370,7 @@ Object rules:
 
 ## Keeping database and storage consistent
 
-PostgreSQL and RustFS cannot share a transaction, so the order of writes decides what a crash leaves behind: an unused file, never a row pointing at nothing.
+PostgreSQL, MongoDB and RustFS cannot share a transaction (the MongoDB write order is in the section above), so the order of writes decides what a crash leaves behind: an unused file, never a row pointing at nothing.
 
 1. **Upload first, then insert the row.** If the API dies between the two, the file is an orphan and the user retries.
 2. **Delete the row first, then the file.** Files are never deleted inline; the sweep below removes them.
@@ -333,18 +380,19 @@ PostgreSQL and RustFS cannot share a transaction, so the order of writes decides
 
 ## Backups and restore
 
-Back up PostgreSQL and both buckets daily; restore the database first and keep the orphan sweep off until the restore is checked.
+Back up PostgreSQL, MongoDB and both buckets daily; restore the databases first and keep the orphan sweep off until the restore is checked.
 
 | What | How | Kept |
 | --- | --- | --- |
 | PostgreSQL | Nightly base backup + continuous WAL archiving for point-in-time recovery | 14 days (NFR-REL-03) |
+| MongoDB | Nightly `mongodump --gzip` of the `flabsheet` database | 14 days |
 | `assets`, `problems` buckets | Nightly incremental sync to a second location (another S3 target or disk); objects never change, so only new files copy | 14 days of daily snapshots |
 | Redis | AOF only, no backup. After a loss, `flush_outbox` re-sends unsent jobs and `detect_delayed` flags anything left `queued` for staff to requeue | — |
 
 Restore order:
 
 1. Stop the API and the worker.
-2. Restore PostgreSQL to the chosen time.
+2. Restore PostgreSQL to the chosen time, and MongoDB from the same night (`mongorestore --drop`). Log entries and reports newer than the dump are lost; a submission whose report is missing shows no per-test results until it is rejudged.
 3. Restore both buckets from the same night or later. Extra newer files are harmless; missing files are not.
 4. Start the API, check a problem page, a package build and an old submission's source, then re-enable the sweep job.
 

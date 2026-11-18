@@ -1,6 +1,6 @@
 # Backend implementation
 
-The backend is one FastAPI codebase run as two processes, the HTTP API and a background worker; it is the only component that reads or writes PostgreSQL, and the only one the judge talks to.
+The backend is one FastAPI codebase run as two processes, the HTTP API and a background worker; it is the only component that reads or writes PostgreSQL and MongoDB, and the only one the judge talks to.
 
 Auth, sessions, the operation log, student account management, the database models, problem management (`problems`, `packages`), the solving endpoints (`solve`, `submissions`), the judge integration (builds, submissions, events, refresh) and the read side of `settings` exist today. Everything else on this page is the plan for the remaining modules. [backend/AGENTS.md](../backend/AGENTS.md) holds the day-to-day coding rules.
 
@@ -13,23 +13,25 @@ The stack is sync: handlers are plain `def` functions that FastAPI runs in its t
 | Runtime | Python 3.12, FastAPI, Uvicorn, one worker process (see Database) |
 | Database | SQLAlchemy 2 (sync) + psycopg 3. `main.py` creates missing tables and indexes at import with `create_all`; Alembic migrations are deferred until after the MVP (NFR-OPS-04) |
 | Validation | Pydantic v2; separate response models per role (student vs staff) |
+| MongoDB | `pymongo` (sync) for the `operation_logs` and `submission_reports` collections (`db/mongo.py`); `main.py` creates their indexes at import (`ensure_indexes`) |
 | Redis | `redis-py` (sync) for streams, rate limits and caches; `redis.asyncio` only in the SSE route for pub/sub |
 | Object storage | S3 API, path-style, for upload and presigned GET/PUT, through sync `boto3` (`services/storage.py`) |
 | Passwords | `argon2-cffi` (argon2id) |
 | Background jobs | arq (Redis-backed) in a separate `worker` process, same codebase (`worker.py`). Jobs are async wrappers that run the sync services in a thread. The API enqueues best effort; a 5 s cron resumes anything that was lost |
 | Live updates | Server-Sent Events from a plain Starlette `StreamingResponse` (`text/event-stream`); no extra dependency |
 | Metrics | `prometheus-fastapi-instrumentator` at `/metrics`, plus `/healthz` (exists) |
-| Tests | Deferred until after the MVP. Planned: pytest + httpx; Testcontainers (PostgreSQL, Redis, RustFS) |
+| Tests | Deferred until after the MVP. Planned: pytest + httpx; Testcontainers (PostgreSQL, MongoDB, Redis, RustFS) |
 
 The code is flat under `backend/`, with no package prefix. Files marked *planned* do not exist yet:
 
 ```
 main.py                 FastAPI app, CORS, schema setup, routers, ApiError handler
 config.py               settings from env / backend/.env
-cli.py                  seed-admin, seed-students; planned: sync-languages
+cli.py                  seed-admin, seed-students, migrate-to-mongo; planned: sync-languages
 db/postgres.py          engine, SessionLocal, Base, get_database()
 db/redis.py             shared redis client
-db/models/              user, operation_log, student_import, problem, submission, instance_settings
+db/mongo.py             shared MongoDB client, collections, ensure_indexes()
+db/models/              user, student_import, problem, submission, instance_settings
 routers/<area>.py       one APIRouter per area, with its request/response models
   auth.py               login, logout, logout-all, me, change-password
   students.py           list, create, edit, reset password and import CSV
@@ -46,7 +48,8 @@ services/<area>.py      logic shared by routers and background jobs
   auth.py               current_session, require_role, CSRF check
   session.py            session create / lookup / revoke, Redis cache
   rate_limit.py         failed-login counters
-  operation_log.py      log_operation, log_operation_now
+  operation_log.py      log_operation, log_operation_now (MongoDB, after the commit)
+  reports.py            submission reports in MongoDB: per-test results, compile log
   errors.py             ApiError (detail + code)
   storage.py            S3 client, presigned URLs, StorageError
   packages.py           problem.yaml, package zips, build steps
@@ -69,11 +72,11 @@ Each area owns its tables and its routes; endpoints are listed in SRS section 6.
 | `users` | `users`, `student_imports` | Login ID trimmed, case-insensitive (citext), `[A-Za-z0-9._-]{1,64}`. Generated passwords: 12+ chars from `secrets`. CSV import: parse UTF-8 (strip BOM), validate every row, then create all in one transaction or none; return the password CSV in the response only. Last-admin guard on deactivation. No endpoint changes a role | FR-ADM-01–04, FR-STU-01–06 |
 | `problems` | `problems`, `problem_versions`, `problem_languages`, `test_cases`, `images` | Title, statement and hint edits change rows in place. Changes to max points, solution, tests, limits, languages, visibility or checking mode create a new version and trigger a build. `current_version_id` moves only when a build succeeds, so an enabled problem keeps its previous version during a rebuild or after a failed one. Enable only when the problem has a current version. Image upload: sniff MIME, sanitize SVG, 5 MB cap; images are streamed back by `GET /images/{id}` with `Content-Security-Policy: sandbox`. Delete only without student submissions (staff test submissions and their scores are deleted first, in the same transaction), else archive | FR-PRB-01–17 |
 | `packages` | Package zips in RustFS | Build `problem.yaml` from the version (batch, per-language `time_ms`, `checker.strict`, floats, testcases with `sample: true` for visible and sample cases, one `sum` subtask worth the version's max points). Zip deterministically (sorted entries, fixed timestamps) so the SHA-256 is stable | 6.3 |
-| `submissions` | `submissions`, `submission_results` | Submit checks in order: killswitch, problem enabled, language allowed, 64 KB, rate limit (one `SET NX` per user, 10 s), ≤ 3 queued. Student serializer drops hidden-case output, expected output and every checker message on a hidden case (PE included); shows hints only on failed cases. Staff see checker messages and the test data of hidden cases but no output: the judge never sends it. `?student_view=true` gives staff the student shape for the preview page. The overall verdict is shown as `PA` when a failed run still earned part of the points (the judge reports the first failing test's verdict); the stored verdict stays as sent. `GET /submissions` returns the caller's own submissions, optionally for one `problem` slug | FR-STD-05–09, FR-ADM-05, FR-MON-02 |
+| `submissions` | `submissions`, MongoDB `submission_reports` | Submit checks in order: killswitch, problem enabled, language allowed, 64 KB, rate limit (one `SET NX` per user, 10 s), ≤ 3 queued. Student serializer drops hidden-case output, expected output and every checker message on a hidden case (PE included); shows hints only on failed cases. Staff see checker messages and the test data of hidden cases but no output: the judge never sends it. `?student_view=true` gives staff the student shape for the preview page. The overall verdict is shown as `PA` when a failed run still earned part of the points (the judge reports the first failing test's verdict); the stored verdict stays as sent. `GET /submissions` returns the caller's own submissions, optionally for one `problem` slug | FR-STD-05–09, FR-ADM-05, FR-MON-02 |
 | `judge` | `judge_events`, `judge_outbox`, Redis streams | Enqueue, events endpoint, refresh endpoint (next section) | FR-JDG-01–05, 6.2–6.5 |
 | `scoring` | `problem_scores`, leaderboard cache, exports | Update the current score inside the `done` transaction (built, in `services/submissions.py`). Staff test submissions get no `problem_scores` row, so nothing that reads the table can rank them. Leaderboard: one SQL query over `problem_scores` for active students and enabled problems, cached 5 s; frozen mode serves a snapshot taken at freeze time. CSV exports stream rows, UTF-8 with BOM | FR-JDG-06, FR-STD-02/03, FR-MON-01, 04, 05, 07 |
 | `settings` | `instance_settings` | Single row, read from PostgreSQL by primary key on every `GET /settings` and every submit (no Redis cache yet: add one only if the read shows up under load). `PUT /admin/settings/submissions` (admin) changes the killswitch and writes `settings.killswitch` to the operation log; the leaderboard endpoint is planned | FR-ADM-05, FR-MON-07 |
-| `operation_log` | `operation_logs` | The audit log. `log_operation(db, "area.action", user_id=..., info={...})` inside the operation's transaction; `log_operation_now(...)` for events that must survive a failed request (failed logins, permission denials). Never passwords or tokens in `info` | NFR-SEC-09 |
+| `operation_log` | MongoDB `operation_logs` | The audit log. `log_operation(db, "area.action", user_id=..., info={...})` inside the operation's transaction (written to MongoDB when it commits, best effort); `log_operation_now(...)` for events that must survive a failed request (failed logins, permission denials). Never passwords or tokens in `info` | NFR-SEC-09 |
 
 **Errors.** Raise `HTTPException(status, "Sentence for the user.")`. When the frontend has to react to the kind of error, raise `ApiError(status, "Sentence.", code="snake_case")` from `services/errors.py` instead; the body is then `{"detail": ..., "code": ...}`. Codes in use or reserved: `rate_limited` (in use), `submissions_closed`, `language_not_allowed`, `problem_disabled`, `csv_invalid`.
 

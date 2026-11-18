@@ -14,7 +14,7 @@
 name: flabsheet-dev
 
 include:
-  - path: infra/compose.yaml   # postgres, redis, rustfs, storage-init
+  - path: infra/compose.yaml   # postgres, redis, mongo, rustfs, storage-init
     env_file: .env
 
 # Settings the backend and its worker share. The judge (compose.dev.judge.yaml)
@@ -23,6 +23,7 @@ include:
 x-backend-env: &backend-env
   POSTGRES_URL: postgresql+psycopg://${POSTGRES_USER:-flabsheet}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-flabsheet}
   REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+  MONGO_URL: mongodb://${MONGO_ROOT_USER:-flabsheet}:${MONGO_ROOT_PASSWORD}@mongo:27017/?authSource=admin
   S3_ENDPOINT_URL: http://rustfs:9000
   S3_PUBLIC_ENDPOINT_URL: http://rustfs:9000
   S3_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
@@ -53,6 +54,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      mongo:
         condition: service_healthy
       rustfs:
         condition: service_started

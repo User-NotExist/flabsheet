@@ -192,11 +192,12 @@ export async function resetStaffPassword(id: number): Promise<StaffCredential> {
 
 /** One row of the operation log. `user` is null for system events. */
 export type OperationLogEntry = {
-  id: number;
+  /** MongoDB ObjectId: opaque, use it only as a key. */
+  id: string;
   created_at: string;
   /** Dotted name such as "auth.login_failed". */
   type: string;
-  /** As stored: JSON text of an object, or a plain string. */
+  /** JSON text of an object, or a plain string as logged. */
   info: string | null;
   user: Pick<User, "id" | "login_id" | "display_name" | "role"> | null;
 };

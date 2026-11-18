@@ -68,7 +68,8 @@ Roles are fixed per account. A user has exactly one role. There is no self-regis
 | --- | --- |
 | Frontend | Next.js (React) with shadcn/ui components and Tailwind CSS, run on Bun |
 | Backend API | FastAPI (Python) |
-| Relational DB | PostgreSQL: users, problems, test cases, submissions, results |
+| Relational DB | PostgreSQL: users, problems, test cases, submissions, scores |
+| Document DB | MongoDB: operation log, submission reports (per-test results, compile log) |
 | Queue / cache | Redis: judge job streams, sessions/rate limits, live result fan-out |
 | Object storage | RustFS (S3-compatible): images, submission sources, problem packages |
 | Judge | `judge-worker-go` with go-judge sandbox, kept in its own repository (git submodule) |
@@ -85,10 +86,11 @@ The judge worker MUST be treated as an external component: Flabsheet adapts to i
 
 ## 3. System architecture
 
-The FastAPI backend is the only component that touches PostgreSQL; the judge host receives work through Redis and reports back over HTTP.
+The FastAPI backend is the only component that touches PostgreSQL and MongoDB; the judge host receives work through Redis and reports back over HTTP.
 
 ```
 Browser ──HTTPS──▶ Next.js frontend (Bun) ──/api/*───▶ FastAPI backend ──▶ PostgreSQL
+                                                         ├──▶ MongoDB (operation_logs, submission_reports)
                                                          ├──▶ RustFS (assets, problems)
                                                          └──XADD──▶ Redis streams
 Judge host (dedicated):
@@ -97,7 +99,7 @@ Judge host (dedicated):
   judge-worker ──POST /internal/judge-events──▶ FastAPI
   judge-worker ──▶ go-judge sandbox
 ```
-The judge never talks to PostgreSQL; the backend is the only component that does.
+The judge never talks to PostgreSQL or MongoDB; the backend is the only component that does.
 
 The browser reaches the backend through the Next.js app; the judge worker pulls jobs from Redis, fetches packages and sources from RustFS, runs code in go-judge and posts events to the API.
 
@@ -108,14 +110,15 @@ The browser reaches the backend through the Next.js app; the judge worker pulls 
 | Frontend | Next.js (React), shadcn/ui, Tailwind, run on Bun | All UI: login, problem list/view, code editor, results, leaderboard, staff and admin consoles; Markdown rendering; SSE client for live status |
 | Backend API | FastAPI (Python 3.12), SQLAlchemy (sync) | Auth and RBAC, problem and account management, package building, job enqueueing, judge event ingestion, scoring aggregation, CSV import/export |
 | Background tasks | Same codebase, separate worker process (for example arq or Dramatiq on Redis) | Outbox retry for failed enqueues, package assembly after `build_done`, leaderboard cache refresh, stale-job detection |
-| Relational DB | PostgreSQL 16+ | System of record |
+| Relational DB | PostgreSQL 16+ | System of record for everything relational |
+| Document DB | MongoDB 8.0 (standalone) | Operation log and submission reports: written once per event, read as a whole |
 | Queue / cache | Redis 7.x (AOF on) | Judge streams, stream registry, pub/sub for live updates, rate limits |
 | Object storage | RustFS | Images, sources, staging and final packages, expected outputs |
 | Judge | judge-worker-go + go-judge v1.13.3 | Compile, run, check and score submissions; build expected outputs |
 
 ### 3.2 Deployment view
 
-- **App server:** frontend, API, background tasks, PostgreSQL, Redis, RustFS via Docker Compose behind a TLS reverse proxy (Caddy or Nginx).
+- **App server:** frontend, API, background tasks, PostgreSQL, MongoDB, Redis, RustFS via Docker Compose behind a TLS reverse proxy (Caddy or Nginx).
 - **Judge hosts (1..n):** each runs the `go-judge` + `judge-worker` pair from the judge repository, with a unique `WORKER_ID`, on an isolated network segment.
 - **Network rules:** judge hosts may reach Redis, RustFS and `/internal/*` on the API only; the public internet reaches only the reverse proxy. `/internal/*` is served on the same port as the rest of the API: the reverse proxy refuses those paths from the public internet and passes them only from the judge network (NFR-SEC-06). RustFS is never exposed to browsers, so statement images are streamed by the API.
 
@@ -212,7 +215,7 @@ Every requirement below is MUST unless marked otherwise. "Acceptance" lines stat
 | ID | Requirement | Acceptance |
 | --- | --- | --- |
 | FR-JDG-01 | On submit, the API stores the source in RustFS, creates a submission row (status `queued`), and enqueues a JudgeJob on the `practice` lane in the same flow. | No submission is ever stored without a queued job, or vice versa. |
-| FR-JDG-02 | The API consumes judge events (section 6.4) and updates submission status and per-test results in PostgreSQL. | Events are applied exactly once even if delivered twice. |
+| FR-JDG-02 | The API consumes judge events (section 6.4) and updates submission status in PostgreSQL and per-test results in MongoDB. | Events are applied exactly once even if delivered twice. |
 | FR-JDG-03 | Score is computed by the judge (`score_milli`); the API stores it and converts to points with 2 decimals for display. | Displayed score = `score_milli` / 1000. |
 | FR-JDG-04 | Default scoring: all test cases form one subtask in `sum` mode worth the problem's max points, so score = max points × fraction of test cases passed. | 7 of 10 passed on a 100-point problem = 70. |
 | FR-JDG-05 | A submission whose job produces no `done` event within 15 min is shown as "delayed"; staff can requeue it. | Delayed state is visible to staff and the student. |
@@ -220,7 +223,7 @@ Every requirement below is MUST unless marked otherwise. "Acceptance" lines stat
 
 ## 5. Data model
 
-PostgreSQL holds all authoritative state; RustFS holds blobs referenced by key; Redis holds only transient data that can be rebuilt.
+PostgreSQL holds the authoritative relational state; MongoDB holds the operation log and the per-test submission reports (section 5.1.1); RustFS holds blobs referenced by key; Redis holds only transient data that can be rebuilt.
 
 ### 5.1 PostgreSQL entities
 
@@ -234,13 +237,18 @@ PostgreSQL holds all authoritative state; RustFS holds blobs referenced by key; 
 | `test_cases` | `id`, `problem_version_id`, `ordinal`, `name`, `input_key`, `answer_key`, `answer_sha256`, `visibility` (hidden/visible/sample), `hint_md`, `ref_time_ms` | `name` = file stem in the package (`1`, `2`, …) |
 | `images` | `id`, `problem_id`, `object_key`, `mime`, `bytes`, `uploaded_by`, `created_at` |  |
 | `submissions` | `id`, `user_id`, `problem_id`, `problem_version_id`, `language_id`, `source_key`, `source_sha256`, `status` (queued/compiling/running/done/delayed/review), `verdict`, `score_milli`, `attempt`, `job_id`, `is_staff`, `created_at`, `finished_at` | One row per submit |
-| `submission_results` | `submission_id`, `test_case_id`, `attempt`, `verdict`, `time_ms`, `memory_kb`, `fraction`, `checker_msg`, `output_preview` | `output_preview` stored only for sample and visible cases |
 | `judge_events` | `event_id` (PK), `submission_id`, `attempt`, `seq`, `type`, `received_at` | Idempotency log |
 | `problem_scores` | `user_id`, `problem_id`, `score_milli`, `submission_id`, `submission_created_at`, `achieved_at` | Holds the latest judged submission's score; updated on every `done`; feeds list, leaderboard and export |
 | `student_imports` | `id`, `staff_id`, `row_count`, `created_at` | Audit only; passwords never stored |
 | `judge_outbox` | `id`, `job_id` (unique), `stream`, `payload`, `created_at`, `sent_at`, `tries`, `last_error` | Judge and build jobs waiting to be pushed to Redis (section 6.2) |
-| `operation_logs` | `id`, `user_id`, `type` (dotted, e.g. `auth.login`), `info` (JSON text), `created_at` | The audit log: auth events, account, problem and settings changes (NFR-SEC-09) |
 | `instance_settings` | `submissions_open` (bool), `submissions_message`, `leaderboard_mode` (live/hidden/frozen), `leaderboard_frozen_at`, `leaderboard_snapshot`, `updated_by`, `updated_at` | Single row; read on every submit |
+
+#### 5.1.1 MongoDB collections
+
+| Collection | Key fields | Notes |
+| --- | --- | --- |
+| `operation_logs` | `_id` (ObjectId), `created_at`, `user_id`, `type` (dotted, e.g. `auth.login`), `info` (nested document or string) | The audit log: auth events, account, problem and settings changes (NFR-SEC-09). Written after the Postgres commit, best effort |
+| `submission_reports` | `_id` (`"{submission_id}:{attempt}"`), `submission_id`, `attempt`, `problem_id`, `user_id`, `compile_log`, `results` (map of test case id → `verdict`, `time_ms`, `memory_kb`, `fraction`, `checker_msg`, `output_preview`, `preview_truncated`) | One document per attempt. `output_preview` stored only for sample and visible cases. Written before the judge event's Postgres commit, idempotently |
 
 ### 5.2 RustFS buckets and keys
 
@@ -382,7 +390,7 @@ Targets assume one course of up to 500 students and 100 problems on the default 
 | --- | --- |
 | NFR-REL-01 | No submission is lost: a queued job survives API, worker or Redis restarts (Redis AOF on, `appendfsync everysec`). |
 | NFR-REL-02 | Event handling is idempotent and order-safe per attempt; a replayed spool produces the same final state. |
-| NFR-REL-03 | PostgreSQL backed up daily with 14-day retention and point-in-time recovery; RustFS buckets `assets` and `problems` backed up daily. |
+| NFR-REL-03 | PostgreSQL backed up daily with 14-day retention and point-in-time recovery; MongoDB (`mongodump`) and RustFS buckets `assets` and `problems` backed up daily. |
 | NFR-REL-04 | Service availability 99.5% during the teaching term, excluding announced maintenance. |
 | NFR-REL-05 | Judge results are deterministic: the same source on the same problem version gives the same verdict. |
 
@@ -399,7 +407,7 @@ Targets assume one course of up to 500 students and 100 problems on the default 
 
 | ID | Requirement |
 | --- | --- |
-| NFR-OPS-01 | All services ship as Docker images with a Compose file for a single-server deployment (frontend, API, PostgreSQL, Redis, RustFS) plus separate judge hosts. |
+| NFR-OPS-01 | All services ship as Docker images with a Compose file for a single-server deployment (frontend, API, PostgreSQL, MongoDB, Redis, RustFS) plus separate judge hosts. |
 | NFR-OPS-02 | API exposes `/healthz` and Prometheus `/metrics`; worker metrics (`:9100`) and go-judge metrics (`:5052`) are scraped. |
 | NFR-OPS-03 | Alerts at minimum: practice queue backlog, any `JE`, SE above 1%, spool not draining, judge host missing. |
 | NFR-OPS-04 | Deferred until after the MVP: schema changes via migrations (Alembic), zero manual SQL in deployment. Until then the API creates missing tables and indexes at startup (`create_all`), a change to an existing table needs manual SQL or a fresh database, and the API runs as a single worker process. |
@@ -445,7 +453,8 @@ None remain; every question is settled in 8.3.
 | Judge access to `/internal/*` | Same port as the API, restricted by reverse-proxy path rules | 3.2, NFR-SEC-06 |
 | Secrets in images | Allowed for the locally built production images only | NFR-SEC-08 |
 | API paths and errors | Unversioned backend paths; errors are `detail` plus optional `code` | 6.1 |
-| Audit storage | The existing `operation_logs` table | 5.1, NFR-SEC-09 |
+| Audit storage | The MongoDB `operation_logs` collection, written after the commit (an entry can be lost while MongoDB is down) | 5.1.1, NFR-SEC-09 |
+| Per-test results | The MongoDB `submission_reports` collection, one document per attempt; older attempts are kept | 5.1.1 |
 | Migrations and tests | Alembic and the automated test suites are deferred past the MVP | NFR-OPS-04 |
 
 ### 8.4 Sources

@@ -4,7 +4,7 @@
 // Agent: any node (agent any) on the app server, with Docker
 // Engine and the Compose v2 plugin, whose Jenkins user is in the docker group.
 // The stack runs on that node's Docker daemon, so data volumes (pg-data,
-// redis-data, rustfs-data) persist between builds under the "flabsheet"
+// redis-data, mongo-data, rustfs-data) persist between builds under the "flabsheet"
 // project name.
 //
 // Credentials (kind "Secret file"), filled from the matching *.example files:
@@ -110,7 +110,7 @@ pipeline {
                     set -eu
                     docker compose up --detach --no-build --remove-orphans \
                         --wait --wait-timeout 240 \
-                        postgres redis rustfs backend worker frontend
+                        postgres redis mongo rustfs backend worker frontend
                     docker compose run --rm storage-init
                 '''
             }

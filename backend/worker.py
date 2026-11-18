@@ -23,7 +23,6 @@ from arq import cron
 
 # Every model, so SQLAlchemy can resolve foreign keys between their tables
 import db.models.instance_settings  # noqa: F401
-import db.models.operation_log  # noqa: F401
 import db.models.problem  # noqa: F401
 import db.models.student_import  # noqa: F401
 import db.models.submission  # noqa: F401
