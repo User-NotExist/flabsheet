@@ -19,8 +19,9 @@ Flabsheet is a programming-course platform for students, staff and admins: probl
 ```
 browser ──► frontend (Next.js :3000) ──/api/* route handlers──► backend (FastAPI :8000) ──► PostgreSQL
                 │  src/proxy.ts: page auth gate (GET /auth/me)                      └────► Redis (sessions cache, rate limits)
+                                                                                            ├────► MongoDB (operation_logs, submission_reports)
                                                                                             RustFS (S3: buckets "assets", "problems")
-                                                  worker (arq, same backend code) ──► PostgreSQL, Redis, RustFS
+                                                  worker (arq, same backend code) ──► PostgreSQL, MongoDB, Redis, RustFS
 judge-worker-go ◄── Redis Streams / RustFS (separate hosts in production) ──► backend /internal/* (events)
 ```
 
@@ -32,7 +33,7 @@ judge-worker-go ◄── Redis Streams / RustFS (separate hosts in production) 
 ```
 backend/            FastAPI service + background worker (uv, Python 3.12)
 frontend/           Next.js app (bun)
-infra/compose.yaml  postgres 16.4, redis 7.4.1, rustfs 1.0.2, storage-init (creates buckets)
+infra/compose.yaml  postgres 16.4, mongo 8.0.12, redis 7.4.1, rustfs 1.0.2, storage-init (creates buckets)
 compose.dev.yaml    infra + backend/worker/frontend with hot reload (source bind-mounted)
 compose.dev.judge.yaml  overlay on compose.dev.yaml: go-judge/judge-worker built from the submodule
 compose.prod.yaml   infra + production images (.env files baked in at build time)
@@ -66,7 +67,7 @@ docker compose -f infra/compose.yaml --env-file .env up -d
 - **Password rule**: `MIN_PASSWORD_LENGTH = 8` lives in `backend/cli.py`, `backend/routers/auth.py` and `frontend/src/lib/api.ts`.
 - **Login id rule**: `^[A-Za-z0-9._-]{1,64}$` appears in `backend/db/models/user.py` (DB check), `backend/routers/auth.py`, `backend/cli.py`, plus `maxLength={64}` in the login form.
 - **Roles**: `student | staff | admin`, defined by `UserRole` (backend) and the `UserRole` type (frontend `lib/api.ts`).
-- **API shapes**: `AuthResponse`/`UserOut` in `backend/routers/auth.py` mirror the `User`/`AuthResponse` types in `frontend/src/lib/api.ts`. The frontend types are written by hand, and JSON fields are snake_case on both sides.
+- **API shapes**: `AuthResponse`/`UserOut` in `backend/routers/auth.py` mirror the `User`/`AuthResponse` types in `frontend/src/lib/api.ts`. `LogOut` in `backend/routers/logs.py` mirrors `OperationLogEntry`; its `id` is a MongoDB ObjectId string. The frontend types are written by hand, and JSON fields are snake_case on both sides.
 - **Error codes**: errors are `{detail}` plus an optional `code` (backend `services/errors.py` `ApiError`, frontend `ApiError.code`). The frontend branches on codes, so never rename one. The list is in `docs/srs.md` section 6.1.
 - **Judge contract**: job, package and event formats are defined by `judge-worker-go/README.md`. The backend adapts to it; contract changes are additive and made in the judge repo first.
 - **Languages**: `backend/services/languages.py` is a copy of the judge's `languages.yaml` (ids and `source_name`). Add a language in the judge first, then there.
@@ -82,7 +83,7 @@ docker compose -f infra/compose.yaml --env-file .env up -d
 - **Commits**: short conventional prefixes, lower case: `feat: …`, `chore: …`, `refact: …`. Don't commit or push unless asked.
 - **Comments explain why** (security reasons, invariants, framework quirks), not what. Module docstrings and JSDoc headers show usage. Keep them up to date when you change behaviour.
 - **Config**: every new setting goes in the matching `*.example` file with its default and a one-line explanation. Never add real secrets; examples use `change-me`.
-- **Pinned versions**: Docker images and tools (uv 0.12.15, bun 1.3.14, postgres, redis, rustfs) are pinned on purpose, and redis/rustfs match the judge worker's dev stack. Don't bump them unless asked.
+- **Pinned versions**: Docker images and tools (uv 0.12.15, bun 1.3.14, postgres, mongo, redis, rustfs) are pinned on purpose, and redis/rustfs match the judge worker's dev stack. Don't bump them unless asked.
 - **Submodule**: treat `judge-worker-go/` as a separate project with its own rules. Don't edit it from here unless asked, and never commit a submodule pointer change by accident.
 
 ## Safety

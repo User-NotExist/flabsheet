@@ -48,13 +48,12 @@ from db.models.submission import (
     MAX_SOURCE_BYTES,
     ProblemScore,
     Submission,
-    SubmissionResult,
     SubmissionStatus,
 )
 from db.models.user import User, UserRole
 from db.postgres import SessionLocal, get_database
 from routers.solve import LanguageOut, language_out, read_text
-from services import storage
+from services import reports, storage
 from services.auth import CurrentSession
 from services.errors import ApiError
 from services.languages import LANGUAGES
@@ -208,7 +207,7 @@ def _overall_verdict(submission: Submission, max_points: int) -> Optional[str]:
 
 def _result_out(
     case: TestCase,
-    result: SubmissionResult,
+    result: dict[str, Any],
     texts: tuple[tuple[str, bool], tuple[str, bool]],
     staff_view: bool,
 ) -> TestResultOut:
@@ -218,18 +217,18 @@ def _result_out(
     return TestResultOut(
         ordinal=case.ordinal,
         visibility=case.visibility,
-        verdict=result.verdict,
-        time_ms=result.time_ms,
-        memory_kb=result.memory_kb,
-        checker_msg=result.checker_msg if detailed else None,
+        verdict=result["verdict"],
+        time_ms=result.get("time_ms"),
+        memory_kb=result.get("memory_kb"),
+        checker_msg=result.get("checker_msg") if detailed else None,
         input=input_text if detailed else None,
         input_truncated=input_cut and detailed,
         expected=expected if detailed else None,
         expected_truncated=expected_cut and detailed,
         # Never stored for a hidden case, so staff have none to see either
-        output=None if hidden else result.output_preview,
-        output_truncated=result.preview_truncated and not hidden,
-        hint_md=case.hint_md if result.verdict != "AC" else None,
+        output=None if hidden else result.get("output_preview"),
+        output_truncated=bool(result.get("preview_truncated")) and not hidden,
+        hint_md=case.hint_md if result["verdict"] != "AC" else None,
     )
 
 
@@ -240,22 +239,19 @@ def _submission_out(
     version = db.get(ProblemVersion, submission.problem_version_id)
     assert problem is not None and version is not None
     cases = {case.id: case for case in version.test_cases}
+    report = reports.current_report(submission)
+    # (test case id, result) pairs in execution order
     results = sorted(
         (
-            result
-            for result in db.scalars(
-                select(SubmissionResult).where(
-                    SubmissionResult.submission_id == submission.id,
-                    SubmissionResult.attempt == submission.attempt,
-                )
-            )
-            if result.test_case_id in cases
+            (case_id, result)
+            for case_id, result in reports.results_by_case(report).items()
+            if case_id in cases
         ),
-        key=lambda result: cases[result.test_case_id].ordinal,
+        key=lambda pair: cases[pair[0]].ordinal,
     )
 
-    def texts(result: SubmissionResult) -> tuple[tuple[str, bool], tuple[str, bool]]:
-        case = cases[result.test_case_id]
+    def texts(pair: tuple[int, dict[str, Any]]) -> tuple[tuple[str, bool], tuple[str, bool]]:
+        case = cases[pair[0]]
         # Hidden test data is not even read for a student's response
         if case.visibility is TestCaseVisibility.hidden and not staff_view:
             return ("", False), ("", False)
@@ -301,12 +297,12 @@ def _submission_out(
         # A student needs the log to fix a compile error; warnings of a build
         # that succeeded are for staff
         compile_log=(
-            submission.compile_log if staff_view or submission.verdict == "CE" else None
+            report.get("compile_log") if staff_view or submission.verdict == "CE" else None
         ),
         tests_total=len(cases),
         results=[
-            _result_out(cases[result.test_case_id], result, text, staff_view)
-            for result, text in zip(results, case_texts)
+            _result_out(cases[case_id], result, text, staff_view)
+            for (case_id, result), text in zip(results, case_texts)
         ],
         staff_view=staff_view,
         author=(

@@ -1,9 +1,10 @@
-"""Submissions, per-test results, judge event dedup, the outbox and current scores.
+"""Submissions, judge event dedup, the outbox and current scores.
 
 Flow: a submission row and its ``judge_outbox`` row are written in one
 transaction; a relay pushes the outbox payload to the Redis stream and sets
 ``sent_at``. Worker events are deduplicated by ``judge_events.event_id`` before
-they update ``submissions`` / ``submission_results``. ``problem_scores`` keeps
+they update ``submissions`` and the MongoDB submission report (per-test
+results and the compile log, ``services/reports.py``). ``problem_scores`` keeps
 the score of each user's latest submission per problem
 (``submission_created_at`` decides which one is latest when events arrive out
 of order).
@@ -18,7 +19,6 @@ from __future__ import annotations
 
 import enum
 from datetime import datetime
-from decimal import Decimal
 from typing import Any, Optional
 
 from sqlalchemy import (
@@ -32,13 +32,12 @@ from sqlalchemy import (
     Identity,
     Index,
     Integer,
-    Numeric,
     Text,
     func,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from db.postgres import Base
 
@@ -103,7 +102,6 @@ class Submission(Base):
     )
     score_milli: Mapped[Optional[int]] = mapped_column(Integer)
     judge_reason: Mapped[Optional[str]] = mapped_column(Text)  # done.reason for SE / JE
-    compile_log: Mapped[Optional[str]] = mapped_column(Text)
     attempt: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="1"
     )
@@ -116,40 +114,6 @@ class Submission(Base):
     )
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-
-    results: Mapped[list["SubmissionResult"]] = relationship(
-        back_populates="submission",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
-
-
-class SubmissionResult(Base):
-    """One test case result. Rows of an older attempt are cleared on rejudge."""
-
-    __tablename__ = "submission_results"
-
-    submission_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("submissions.id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    test_case_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("test_cases.id"), primary_key=True
-    )
-    attempt: Mapped[int] = mapped_column(Integer, nullable=False)
-    verdict: Mapped[str] = mapped_column(Text, nullable=False)
-    time_ms: Mapped[Optional[int]] = mapped_column(Integer)
-    memory_kb: Mapped[Optional[int]] = mapped_column(Integer)
-    fraction: Mapped[Optional[Decimal]] = mapped_column(Numeric(7, 6))
-    checker_msg: Mapped[Optional[str]] = mapped_column(Text)  # ≤ 1 KiB from the judge
-    # Only stored for sample and visible cases, so hidden outputs never leak
-    output_preview: Mapped[Optional[str]] = mapped_column(Text)
-    preview_truncated: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default="false"
-    )
-
-    submission: Mapped[Submission] = relationship(back_populates="results")
 
 
 class JudgeEvent(Base):

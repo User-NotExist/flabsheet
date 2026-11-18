@@ -6,6 +6,10 @@ reports ``started``, ``compiled``, ``test_result`` (one per test), and ``done``;
 :func:`apply_event` applies each exactly once and in a way that is safe when
 events repeat or belong to an attempt that was superseded (SRS 6.4).
 
+Per-test results and the compile log live in MongoDB (``services/reports.py``):
+:func:`apply_event` writes them before its Postgres commit, idempotently, so a
+failed commit or a failed Mongo write both end in a judge retry.
+
 After every committed change :func:`publish_progress` sends a small snapshot to
 the Redis channel ``sub:{submission_id}``, which the SSE route relays to the
 browser. The snapshot never carries test data, only counts and the verdict.
@@ -37,6 +41,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Optional
 
 import redis
+from pymongo.errors import PyMongoError
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
@@ -48,11 +53,10 @@ from db.models.submission import (
     JudgeOutbox,
     ProblemScore,
     Submission,
-    SubmissionResult,
     SubmissionStatus,
 )
 from db.redis import redis_client
-from services import storage
+from services import reports, storage
 from services.judge import new_job_id, send_outbox
 from services.languages import LANGUAGES, Language
 from services.packages import language_time_limits
@@ -322,18 +326,10 @@ def rejudge_problem(
 
 def progress(db: Session, submission: Submission) -> dict[str, Any]:
     """What the live status line needs. Contains no test data."""
-    tests_done = db.scalar(
-        select(func.count())
-        .select_from(SubmissionResult)
-        .where(
-            SubmissionResult.submission_id == submission.id,
-            SubmissionResult.attempt == submission.attempt,
-        )
-    )
     return {
         "id": submission.id,
         "status": submission.status.value,
-        "tests_done": tests_done or 0,
+        "tests_done": reports.tests_done(submission),
         "verdict": submission.verdict,
         "score_milli": submission.score_milli,
     }
@@ -343,7 +339,7 @@ def publish_progress(db: Session, submission: Submission) -> None:
     """Tell open pages about a committed change. Best effort: they also poll."""
     try:
         redis_client.publish(channel(submission.id), json.dumps(progress(db, submission)))
-    except redis.RedisError:
+    except (redis.RedisError, PyMongoError):
         logger.warning("could not publish progress of submission %s", submission.id, exc_info=True)
 
 
@@ -361,12 +357,12 @@ def _reset_for_new_attempt(db: Session, submission: Submission, attempt: int) ->
     submission.verdict_unknown = False
     submission.score_milli = None
     submission.judge_reason = None
-    submission.compile_log = None
     submission.finished_at = None
-    db.execute(delete(SubmissionResult).where(SubmissionResult.submission_id == submission.id))
+    # Nothing to clear in MongoDB: the new attempt reads a document of its own
 
 
 def _store_test_result(db: Session, submission: Submission, payload: Mapping[str, Any]) -> None:
+    """Write one result to MongoDB. Runs before the event's commit; raises on a Mongo error."""
     name = str(payload.get("testcase") or "")
     case = db.scalar(
         select(TestCase).where(
@@ -384,24 +380,16 @@ def _store_test_result(db: Session, submission: Submission, payload: Mapping[str
     message = payload.get("checker_msg")
     fraction = payload.get("fraction")
     values = {
-        "attempt": submission.attempt,
         "verdict": str(payload.get("verdict") or ""),
         "time_ms": _int(payload.get("time_ms")),
         "memory_kb": _int(payload.get("memory_kb")),
         "fraction": fraction if isinstance(fraction, (int, float)) and not isinstance(fraction, bool) else None,
         "checker_msg": str(message)[:MAX_CHECKER_MSG_CHARS] if message else None,
-        # PostgreSQL text cannot hold NUL, which a program is free to print
+        # A program is free to print NUL; it is shown as U+FFFD
         "output_preview": preview.replace("\x00", "�") if isinstance(preview, str) else None,
         "preview_truncated": shown and payload.get("preview_truncated") is True,
     }
-    db.execute(
-        insert(SubmissionResult)
-        .values(submission_id=submission.id, test_case_id=case.id, **values)
-        .on_conflict_do_update(
-            index_elements=[SubmissionResult.submission_id, SubmissionResult.test_case_id],
-            set_=values,
-        )
-    )
+    reports.store_result(submission, case.id, values)
 
 
 def _finish(db: Session, submission: Submission, payload: Mapping[str, Any]) -> None:
@@ -469,7 +457,12 @@ def _drop_score(db: Session, submission: Submission) -> None:
 
 
 def apply_event(db: Session, event: Mapping[str, Any]) -> Outcome:
-    """Apply one judge event for a submission, in its own transaction. Commits."""
+    """Apply one judge event for a submission, in its own transaction. Commits.
+
+    Test results and the compile log go to MongoDB before the commit; a Mongo
+    error propagates (503 via main.py) and rolls the event back, so the judge
+    sends it again.
+    """
     submission_id = _int(event.get("submission_id"))
     attempt = _int(event.get("attempt")) or 1
     kind = str(event.get("type") or "")
@@ -523,8 +516,9 @@ def apply_event(db: Session, event: Mapping[str, Any]) -> Outcome:
         submission.started_at = datetime.now(timezone.utc)
     elif kind == "compiled":
         log = payload.get("log")
-        submission.compile_log = (
-            log[:MAX_COMPILE_LOG_CHARS].replace("\x00", "�") if isinstance(log, str) and log else None
+        reports.store_compile_log(
+            submission,
+            log[:MAX_COMPILE_LOG_CHARS].replace("\x00", "�") if isinstance(log, str) and log else None,
         )
         submission.status = SubmissionStatus.compiling
     elif kind == "test_result":

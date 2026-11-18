@@ -5,18 +5,21 @@ from db.postgres import Base, engine
 from sqlalchemy import text
 
 import db.models.user
-import db.models.operation_log
 import db.models.student_import
 import db.models.problem
 import db.models.submission
 import db.models.instance_settings
 from routers import auth, images, internal, leaderboard, logs, problems, progress, settings as settings_router, solve, staff, students, submissions, admin_submissions
+from pymongo.errors import PyMongoError
+
+from db.mongo import ensure_indexes, mongo_error_handler
 from services.errors import ApiError, api_error_handler
 from services.storage import StorageError, storage_error_handler
 
 app = FastAPI()
 app.add_exception_handler(ApiError, api_error_handler)
 app.add_exception_handler(StorageError, storage_error_handler)
+app.add_exception_handler(PyMongoError, mongo_error_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,6 +33,8 @@ with engine.begin() as conn:
     conn.execute(text("CREATE EXTENSION IF NOT EXISTS citext"))
 
 Base.metadata.create_all(engine)
+# The MongoDB side of the schema: collections and their indexes
+ensure_indexes()
 
 app.include_router(auth.router)
 app.include_router(students.router)
@@ -51,5 +56,5 @@ app.include_router(internal.router)
 
 @app.get("/healthz", include_in_schema=False)
 def healthz():
-    """Liveness probe for the Docker HEALTHCHECK. Does not touch Postgres or Redis."""
+    """Liveness probe for the Docker HEALTHCHECK. Does not touch Postgres, Redis or MongoDB."""
     return {"status": "ok"}

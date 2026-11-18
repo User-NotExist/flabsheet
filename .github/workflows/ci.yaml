@@ -1,5 +1,5 @@
 # Three independent checks, one per way the app can break before it ships:
-#   backend   runs the API on the host against real Postgres and Redis
+#   backend   runs the API on the host against real Postgres, Redis and MongoDB
 #   frontend  builds the production bundle and serves it
 #   docker    builds every Dockerfile and brings up the production stack
 #
@@ -58,9 +58,22 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
+      mongo:
+        image: mongo:8.0.12
+        env:
+          MONGO_INITDB_ROOT_USERNAME: flabsheet
+          MONGO_INITDB_ROOT_PASSWORD: ci-password
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     env:
       POSTGRES_URL: postgresql+psycopg://flabsheet:ci-password@localhost:5432/flabsheet
       REDIS_URL: redis://localhost:6379/0
+      MONGO_URL: mongodb://flabsheet:ci-password@localhost:27017/?authSource=admin
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -98,6 +111,17 @@ jobs:
             http://127.0.0.1:8000/auth/login
           curl --fail --silent --show-error --output /dev/null \
             --cookie "$RUNNER_TEMP/cookies" http://127.0.0.1:8000/auth/me
+
+      # The login above wrote an auth.login entry to MongoDB after its commit;
+      # reading it back proves the operation log round trip.
+      - name: Read the operation log
+        run: |
+          curl --fail --silent --show-error \
+            --cookie "$RUNNER_TEMP/cookies" \
+            'http://127.0.0.1:8000/admin/logs?type=auth.login' > "$RUNNER_TEMP/logs.json"
+          cat "$RUNNER_TEMP/logs.json"
+          python3 -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))["total"] >= 1 else 1)' \
+            "$RUNNER_TEMP/logs.json"
 
       - name: Show server log
         if: failure()
@@ -203,7 +227,7 @@ jobs:
       - name: Start production stack
         run: |
           docker compose up --detach --build --wait --wait-timeout 180 \
-            postgres redis rustfs backend frontend
+            postgres redis mongo rustfs backend frontend
 
       - name: Create storage buckets
         run: docker compose run --rm storage-init
@@ -214,7 +238,7 @@ jobs:
             python cli.py seed-admin --login-id "$CI_ADMIN_LOGIN"
 
       # Goes through the frontend like a browser does, proving the
-      # frontend -> backend -> Postgres/Redis path across containers.
+      # frontend -> backend -> Postgres/Redis/MongoDB path across containers.
       - name: Log in through the frontend
         run: |
           curl --fail --silent --show-error --output /dev/null \

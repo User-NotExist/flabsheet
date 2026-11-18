@@ -49,7 +49,7 @@ from db.models.problem import (
 from db.models.submission import MAX_SOURCE_BYTES, ProblemScore, Submission
 from db.models.user import UserRole
 from db.postgres import get_database
-from services import storage
+from services import reports, storage
 from services.auth import CurrentSession, require_role
 from services.jobs import enqueue
 from services.languages import LANGUAGES
@@ -643,7 +643,10 @@ def delete_problem(problem_id: int, session: CurrentSession, db: Db):
         # A student submitted between the count and the delete (ON DELETE RESTRICT)
         db.rollback()
         raise refused
-    # Stored files are left for the orphan sweep (docs/data-and-storage.md)
+    # The staff submissions' reports go after the commit (MongoDB is not part
+    # of the transaction). Stored files are left for the orphan sweep
+    # (docs/data-and-storage.md).
+    reports.delete_for_problem(info["problem_id"])
 
 
 def _set_status(

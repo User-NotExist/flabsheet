@@ -1,18 +1,19 @@
 # Flabsheet MVP — data and storage services (SRS section 3.2, "App server")
 #   PostgreSQL : system of record
 #   Redis      : judge job streams, pub/sub, rate limits (AOF on, NFR-REL-01)
+#   MongoDB    : operation log and submission reports (per-test results)
 #   RustFS     : S3-compatible storage for images, sources and problem packages
 #
 # Usage, from the repository root (normally through compose.dev.yaml or
 # compose.prod.yaml, which include this file):
 #   cp env.example .env         # then set real passwords and keys
 #   docker compose -f infra/compose.yaml --env-file .env up -d
-#   docker compose -f infra/compose.yaml --env-file .env ps   # postgres/redis healthy, storage-init exited 0
+#   docker compose -f infra/compose.yaml --env-file .env ps   # postgres/redis/mongo healthy, storage-init exited 0
 #
 # Ports bind to 127.0.0.1 by default. Judge hosts must reach Redis (6379) and
 # RustFS (9000): set BIND_ADDR in .env to the app server's private IP and allow
-# only the judge network in the firewall. PostgreSQL and the RustFS console
-# should stay private.
+# only the judge network in the firewall. PostgreSQL, MongoDB and the RustFS
+# console should stay private.
 name: flabsheet-data
 
 services:
@@ -86,6 +87,27 @@ services:
       retries: 20
     networks: [default, judge]
 
+  # Document store for the operation log and submission reports
+  # (docs/data-and-storage.md, "MongoDB"). A standalone node is enough: every
+  # write touches one document, so no replica set (multi-document
+  # transactions) is needed. Only the backend and its worker talk to it, so it
+  # stays on 127.0.0.1 and off the judge network.
+  mongo:
+    image: mongo:8.0.12
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-flabsheet}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env}
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      - "127.0.0.1:${MONGO_PORT:-27017}:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   rustfs:
     image: rustfs/rustfs:1.0.2   # same version as the judge worker's dev stack
     restart: unless-stopped
@@ -142,6 +164,7 @@ services:
 volumes:
   pg-data:
   redis-data:
+  mongo-data:
   rustfs-data:
 
 networks:
