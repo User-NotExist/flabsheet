@@ -39,6 +39,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { label: "Students", href: "/manage/students", roles: STAFF },
   { label: "Progress", href: "/manage/progress", roles: STAFF },
   { label: "Submissions", href: "/manage/submissions", roles: STAFF },
+  { label: "Clarifications", href: "/manage/clarifications", roles: STAFF },
   { label: "Leaderboard", href: "/leaderboard", hrefByRole: { staff: "/manage/leaderboard", admin: "/manage/leaderboard" }},
   { label: "Staff accounts", href: "/admin/staff", roles: ADMIN },
   { label: "Settings", href: "/admin/settings", roles: ADMIN },
