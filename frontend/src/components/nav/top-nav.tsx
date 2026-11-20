@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 
 import { AccountMenu } from "@/components/nav/account-menu";
 import { NavLinks } from "@/components/nav/nav-links";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 import { QueueCount } from "@/components/nav/queue-count";
 import { ServerClock } from "@/components/nav/server-clock";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
@@ -55,6 +56,7 @@ export async function TopNav() {
         <ServerClock />
         <QueueCount />
         <ThemeToggle />
+        <NotificationBell />
         <AccountMenu user={user} />
       </div>
     </NavBar>
