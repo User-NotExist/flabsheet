@@ -5,11 +5,13 @@ import Link from "next/link";
 import { useEffect, useLayoutEffect, useState } from "react";
 
 import { FormError } from "@/components/auth/form-error";
+import { Announcements } from "@/components/clarifications/announcements";
 import { Section, StatCard } from "@/components/home/stat-card";
 import { formatFrozenAt } from "@/components/leaderboard/format";
 import { useInstanceSettings } from "@/components/settings/instance-settings";
 import {
   getQueueCount,
+  listClarifications,
   listProblems,
   listStudents,
   type LeaderboardMode,
@@ -25,6 +27,7 @@ const SECTION_TEXT: Record<string, string> = {
   "/manage/students": "Create student accounts and reset passwords.",
   "/manage/progress": "Every student's score on every problem, with CSV export.",
   "/manage/submissions": "Browse, inspect and rejudge submissions.",
+  "/manage/clarifications": "Answer student questions and post announcements.",
   "/leaderboard": "Live standings, and what students see.",
   "/admin/staff": "Create and manage staff accounts.",
   "/admin/settings": "Open or close submissions for everyone.",
@@ -45,6 +48,7 @@ export function StaffHome({ role }: { role: UserRole }) {
   const { settings } = useInstanceSettings();
   const [counts, setCounts] = useState<Counts | null>(null);
   const [queued, setQueued] = useState<number | null>(null);
+  const [openQuestions, setOpenQuestions] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useLayoutEffect(() => {
@@ -64,6 +68,12 @@ export function StaffHome({ role }: { role: UserRole }) {
     getQueueCount()
       .then((n) => {
         if (!cancelled) setQueued(n);
+      })
+      .catch(() => {});
+    // Only the total is needed: one row, the count comes with it
+    listClarifications({ page: 1, pageSize: 1, status: "open", kind: "question" })
+      .then((page) => {
+        if (!cancelled) setOpenQuestions(page.total);
       })
       .catch(() => {});
     return () => {
@@ -129,7 +139,15 @@ export function StaffHome({ role }: { role: UserRole }) {
           value={settings ? MODE_LABELS[settings.leaderboard_mode] : "…"}
           detail={leaderboardDetail}
         />
+        <StatCard
+          label="Open questions"
+          href="/manage/clarifications"
+          value={openQuestions ?? "…"}
+          detail="Waiting for a staff reply."
+        />
       </div>
+
+      <Announcements staff />
 
       <Section title="Go to">
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

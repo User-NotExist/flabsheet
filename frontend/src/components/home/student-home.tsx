@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useLayoutEffect, useState } from "react";
 
 import { FormError } from "@/components/auth/form-error";
+import { Announcements } from "@/components/clarifications/announcements";
 import { Section, StatCard } from "@/components/home/stat-card";
 import { formatFrozenAt } from "@/components/leaderboard/format";
 import { formatPoints, formatScore } from "@/components/submissions/format";
@@ -122,6 +123,8 @@ export function StudentHome() {
         />
         {rankCard(standing, standingError)}
       </div>
+
+      <Announcements />
 
       <Section
         title="Continue solving"
