@@ -49,6 +49,7 @@ worker.py               arq WorkerSettings: start_build, assemble_package jobs +
 services/auth.py        current_session / CurrentSession / require_role(...) dependencies + CSRF check
 services/session.py     session create/lookup/revoke; Postgres is the source of truth, Redis is a read cache
 services/rate_limit.py  Redis rate limits: failed-login counters (per login id, per client IP) and the 10 s submit slot per user
+services/cache_control.py  DefaultNoStoreMiddleware: `Cache-Control: private, no-store` unless the route sets its own
 services/errors.py      ApiError: an HTTPException whose body also carries a machine-readable `code`
 services/operation_log.py  log_operation / log_operation_now: MongoDB operation_logs, written by an after_commit hook
 services/reports.py     MongoDB submission_reports: one document per attempt with per-test results and the compile log
@@ -90,6 +91,7 @@ Imports are absolute from the backend root (`from db.models.user import User`, `
   - The write is best effort, like Redis: a Mongo failure is logged as a warning and never fails the request that committed.
   - Use `log_operation_now(...)` for events that must persist even when the request fails (failed logins, permission denials).
   - Type names are dotted snake_case (`auth.login_failed`). Never put passwords or tokens in `info`.
+- **Browser caching is opt-in**: `DefaultNoStoreMiddleware` (`main.py`) sends `private, no-store` on every response without its own `Cache-Control`. Only set one on a route whose content never changes for that viewer, and keep it `private` (responses depend on the session).
 - **Commit order**: commit the DB first, then touch Redis (`cache_session` after `db.commit()`).
 - **Single worker**: `main.py` sets up the schema at import time, so the production image runs `--workers 1`. Don't raise it until schema setup moves to a migration step.
 - **Versions are immutable**: never change a `ProblemVersion` or its test cases after creation, except `TestCase.hint_md` and the build columns the build steps fill in. A judge-relevant change is a new version (`routers/problems.py` `_same_judging` decides).
