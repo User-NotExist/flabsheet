@@ -50,6 +50,7 @@ from db.models.submission import MAX_SOURCE_BYTES, ProblemScore, Submission
 from db.models.user import UserRole
 from db.postgres import get_database
 from services import reports, storage
+from services.images import InvalidImage, strip_metadata
 from services.auth import CurrentSession, require_role
 from services.jobs import enqueue
 from services.languages import LANGUAGES
@@ -820,7 +821,7 @@ def _sniff_image(data: bytes) -> Optional[str]:
     "/problems/{problem_id}/images", response_model=ImageOut, status_code=status.HTTP_201_CREATED
 )
 def upload_image(problem_id: int, file: UploadFile, session: CurrentSession, db: Db):
-    """Store a statement image; the statement links it as ``/api/images/{id}``."""
+    """Store a statement image without its metadata; the statement links it as ``/api/images/{id}``."""
     problem = _get_editable(db, problem_id)
     data = file.file.read(MAX_IMAGE_BYTES + 1)
     if len(data) > MAX_IMAGE_BYTES:
@@ -829,6 +830,21 @@ def upload_image(problem_id: int, file: UploadFile, session: CurrentSession, db:
     if mime is None:
         raise HTTPException(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "Images must be PNG, JPEG, GIF or WebP"
+        )
+    # Students see every statement image, so EXIF (GPS position, camera),
+    # XMP and comments are dropped before anything is stored
+    try:
+        data = strip_metadata(data, mime)
+    except InvalidImage:
+        raise HTTPException(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            "This image is damaged, too large in pixels or could not be read",
+        ) from None
+    if len(data) > MAX_IMAGE_BYTES:
+        # Re-encoding can grow a file that was optimised by another tool
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            "An image can be at most 5 MB once its metadata is removed",
         )
 
     key = f"images/{problem.id}/{uuid.uuid4().hex}.{_IMAGE_TYPES[mime]}"
