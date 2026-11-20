@@ -1,4 +1,4 @@
-"""Rate limits backed by Redis: failed logins and submissions.
+"""Rate limits backed by Redis: failed logins, submissions and clarifications.
 
 Failed logins
 -------------
@@ -34,6 +34,16 @@ check and the claim are one ``SET NX``, so two requests at the same moment
 cannot both pass. It fails open like the login limiter.
 
     retry_after = submit_retry_after(user_id)               # 0 = allowed, slot taken
+
+Clarifications
+--------------
+One new question per ``QUESTION_INTERVAL_SECONDS`` and one reply per
+``REPLY_INTERVAL_SECONDS`` per user, the same ``SET NX`` slot as submissions,
+failing open the same way. Staff are limited too: the reply interval is short
+enough for working through the queue and still stops a script.
+
+    retry_after = question_retry_after(user_id)
+    retry_after = reply_retry_after(user_id)
 """
 
 from __future__ import annotations
@@ -48,6 +58,8 @@ from db.redis import redis_client
 logger = logging.getLogger(__name__)
 
 SUBMIT_INTERVAL_SECONDS = 10  # FR-STD-06
+QUESTION_INTERVAL_SECONDS = 30  # a question takes longer than that to write
+REPLY_INTERVAL_SECONDS = 5  # a conversation, not a flood
 
 
 def _keys(login_id: str, client_ip: str) -> tuple[str, str]:
@@ -98,13 +110,27 @@ def clear_login_failures(login_id: str) -> None:
         logger.warning("clearing login failures failed", exc_info=True)
 
 
-def submit_retry_after(user_id: int) -> int:
-    """Claim the user's submit slot. Returns 0 when claimed, else the seconds to wait."""
-    key = f"rl:submit:{user_id}"
+def _claim_slot(key: str, seconds: int, what: str) -> int:
+    """Claim ``key`` for ``seconds``. Returns 0 when claimed, else the seconds to wait."""
     try:
-        if redis_client.set(key, "1", nx=True, ex=SUBMIT_INTERVAL_SECONDS):
+        if redis_client.set(key, "1", nx=True, ex=seconds):
             return 0
         return max(int(redis_client.ttl(key)), 1)
     except redis.RedisError:
-        logger.warning("submit rate limit check failed; allowing submission", exc_info=True)
+        logger.warning("%s rate limit check failed; allowing it", what, exc_info=True)
         return 0
+
+
+def submit_retry_after(user_id: int) -> int:
+    """Claim the user's submit slot. Returns 0 when claimed, else the seconds to wait."""
+    return _claim_slot(f"rl:submit:{user_id}", SUBMIT_INTERVAL_SECONDS, "submit")
+
+
+def question_retry_after(user_id: int) -> int:
+    """Claim the user's slot for a new question or announcement."""
+    return _claim_slot(f"rl:question:{user_id}", QUESTION_INTERVAL_SECONDS, "question")
+
+
+def reply_retry_after(user_id: int) -> int:
+    """Claim the user's slot for a new reply."""
+    return _claim_slot(f"rl:reply:{user_id}", REPLY_INTERVAL_SECONDS, "reply")
