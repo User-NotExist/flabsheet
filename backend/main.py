@@ -13,6 +13,7 @@ from routers import auth, images, internal, leaderboard, logs, problems, progres
 from pymongo.errors import PyMongoError
 
 from db.mongo import ensure_indexes, mongo_error_handler
+from services.cache_control import DefaultNoStoreMiddleware
 from services.errors import ApiError, api_error_handler
 from services.storage import StorageError, storage_error_handler
 
@@ -21,6 +22,8 @@ app.add_exception_handler(ApiError, api_error_handler)
 app.add_exception_handler(StorageError, storage_error_handler)
 app.add_exception_handler(PyMongoError, mongo_error_handler)
 
+# Responses are per session: nothing is browser-cached unless a route says so
+app.add_middleware(DefaultNoStoreMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_url],
