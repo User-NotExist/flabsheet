@@ -105,6 +105,8 @@ export function ProblemEditor() {
   const [error, setError] = useState<string | null>(null);
   const [action, setAction] = useState<Action | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // An upload leaves a placeholder in the statement until it finishes
+  const [imageUploading, setImageUploading] = useState(false);
   const [rejudgeOpen, setRejudgeOpen] = useState(false);
   const [rejudgeScope, setRejudgeScope] = useState<RejudgeScope>("latest");
 
@@ -353,8 +355,10 @@ export function ProblemEditor() {
             className="h-9 font-mono"
           />
         </div>
-        <Button type="button" size="lg" onClick={save} disabled={readOnly || busy || !dirty}>
-          {action === "save" ? "Saving…" : "Save"}
+        <Button type="button" size="lg" onClick={save}
+          disabled={readOnly || busy || !dirty || imageUploading}
+        >
+          {action === "save" ? "Saving…" : imageUploading ? "Uploading image…" : "Save"}
         </Button>
       </div>
 
@@ -394,6 +398,7 @@ export function ProblemEditor() {
                 )
               }
               uploadImage={uploadImageFile}
+              onUploadingChange={setImageUploading}
               disabled={readOnly}
             />
           </TabsContent>

@@ -71,7 +71,7 @@ Build these once and reuse them; the student view and the staff preview must ren
 | Component | Used on | Behaviour |
 | --- | --- | --- |
 | `MarkdownView` | Problem page, editor preview, hints | GFM, KaTeX math, highlighted code, images from the API; sanitized, no raw HTML |
-| `MarkdownEditor` | Problem editor | Split edit/preview, image paste and drag-drop upload that inserts `![](url)`, 5 MB and type check before upload |
+| `MarkdownEditor` | Problem editor | Split edit/preview; images via an "Insert image" button (file picker), paste or drag-drop (highlighted drop target). Each upload puts an `[Uploading name… #n]` placeholder at the cursor that becomes `![name](url)`; 5 MB and type check before upload; Save waits for uploads |
 | `TestCaseEditor` | Problem editor | Ordered list with drag reorder; input by typing or `.in` upload; visibility select (hidden / visible / sample); optional hint; expected output and reference time shown after build (staff only) |
 | `BuildStatusPanel` | Problem editor, problem list | Pending / ok / failed; on failure the failing test case, reason and log; warning when reference time is over 50% of the limit |
 | `CodeEditor` | Problem page, problem editor | React CodeMirror with language from the allowed list. On the problem page the page keeps one draft per user, problem and language in `localStorage` (`lib/drafts.ts`; the user id is in the key because lab computers are shared) and shows the 64 KB counter |
