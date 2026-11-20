@@ -42,8 +42,9 @@ NotificationType = Literal["clarification.answered", "clarification.new", "annou
 MAX_TITLE_LENGTH = 200  # same bound as a clarification title
 MAX_BODY_LENGTH = 1000  # a notification is a pointer; the full text lives at its link
 MAX_LINK_LENGTH = 300
-# A path on this site, never another site ("//host" is protocol-relative)
-LINK_PATTERN = r"^/(?!/)[^\s\\]*$"
+# A path on this site, never another site: "//host" is protocol-relative and
+# browsers read a backslash as "/". No look-ahead: pydantic's regex engine lacks it.
+LINK_PATTERN = r"^/([^/\s\\][^\s\\]*)?$"
 
 
 def active_student_ids(db: DbSession) -> list[int]:
