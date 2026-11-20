@@ -69,7 +69,7 @@ Roles are fixed per account. A user has exactly one role. There is no self-regis
 | Frontend | Next.js (React) with shadcn/ui components and Tailwind CSS, run on Bun |
 | Backend API | FastAPI (Python) |
 | Relational DB | PostgreSQL: users, problems, test cases, submissions, scores |
-| Document DB | MongoDB: operation log, submission reports (per-test results, compile log) |
+| Document DB | MongoDB: operation log, submission reports (per-test results, compile log), clarification threads and announcements, notifications |
 | Queue / cache | Redis: judge job streams, sessions/rate limits, live result fan-out |
 | Object storage | RustFS (S3-compatible): images, submission sources, problem packages |
 | Judge | `judge-worker-go` with go-judge sandbox, kept in its own repository (git submodule) |
@@ -90,7 +90,7 @@ The FastAPI backend is the only component that touches PostgreSQL and MongoDB; t
 
 ```
 Browser ──HTTPS──▶ Next.js frontend (Bun) ──/api/*───▶ FastAPI backend ──▶ PostgreSQL
-                                                         ├──▶ MongoDB (operation_logs, submission_reports)
+                                                         ├──▶ MongoDB (operation_logs, submission_reports, clarifications, notifications)
                                                          ├──▶ RustFS (assets, problems)
                                                          └──XADD──▶ Redis streams
 Judge host (dedicated):
@@ -111,7 +111,7 @@ The browser reaches the backend through the Next.js app; the judge worker pulls 
 | Backend API | FastAPI (Python 3.12), SQLAlchemy (sync) | Auth and RBAC, problem and account management, package building, job enqueueing, judge event ingestion, scoring aggregation, CSV import/export |
 | Background tasks | Same codebase, separate worker process (for example arq or Dramatiq on Redis) | Outbox retry for failed enqueues, package assembly after `build_done`, leaderboard cache refresh, stale-job detection |
 | Relational DB | PostgreSQL 16+ | System of record for everything relational |
-| Document DB | MongoDB 8.0 (standalone) | Operation log and submission reports: written once per event, read as a whole |
+| Document DB | MongoDB 8.0 (standalone) | One self-contained document per thing, read as a whole: the operation log and submission reports (written once per event), clarification threads with their replies embedded, and per-user notifications (edited in place, each write atomic on one document) |
 | Queue / cache | Redis 7.x (AOF on) | Judge streams, stream registry, pub/sub for live updates, rate limits |
 | Object storage | RustFS | Images, sources, staging and final packages, expected outputs |
 | Judge | judge-worker-go + go-judge v1.13.3 | Compile, run, check and score submissions; build expected outputs |
@@ -223,7 +223,7 @@ Every requirement below is MUST unless marked otherwise. "Acceptance" lines stat
 
 ## 5. Data model
 
-PostgreSQL holds the authoritative relational state; MongoDB holds the operation log and the per-test submission reports (section 5.1.1); RustFS holds blobs referenced by key; Redis holds only transient data that can be rebuilt.
+PostgreSQL holds the authoritative relational state; MongoDB holds the operation log, the per-test submission reports, clarification threads and notifications (section 5.1.1), which refer to PostgreSQL rows by id; RustFS holds blobs referenced by key; Redis holds only transient data that can be rebuilt.
 
 ### 5.1 PostgreSQL entities
 
@@ -249,6 +249,8 @@ PostgreSQL holds the authoritative relational state; MongoDB holds the operation
 | --- | --- | --- |
 | `operation_logs` | `_id` (ObjectId), `created_at`, `user_id`, `type` (dotted, e.g. `auth.login`), `info` (nested document or string) | The audit log: auth events, account, problem and settings changes (NFR-SEC-09). Written after the Postgres commit, best effort |
 | `submission_reports` | `_id` (`"{submission_id}:{attempt}"`), `submission_id`, `attempt`, `problem_id`, `user_id`, `compile_log`, `results` (map of test case id → `verdict`, `time_ms`, `memory_kb`, `fraction`, `checker_msg`, `output_preview`, `preview_truncated`) | One document per attempt. `output_preview` stored only for sample and visible cases. Written before the judge event's Postgres commit, idempotently |
+| `clarifications` | `_id` (ObjectId), `problem_id` (null = course-wide), `author_id`, `kind` (question/announcement), `title`, `body_md`, `visibility` (public/private), `status` (open/answered/closed), `pinned`, `replies` (≤ 100: `_id`, `author_id`, `role`, `body_md`, `created_at`, `edited_at`), `tags` (≤ 5), `created_at`, `updated_at` | Q&A threads on problems and announcements. Students read public threads and their own, on enabled problems only; a staff reply marks a question answered and notifies its author. Deleted with their problem |
+| `notifications` | `_id` (ObjectId), `user_id`, `type` (`clarification.answered`, `clarification.new`, `announcement`, `manual`), `title`, `body`, `link` (a path on this site), `data`, `is_read`, `created_at` | One per user per event; each user reads and changes only their own. Written best effort (a failure never fails the reply or announcement). A TTL index removes them after 90 days |
 
 ### 5.2 RustFS buckets and keys
 
@@ -272,7 +274,7 @@ PostgreSQL holds the authoritative relational state; MongoDB holds the operation
 | `sub:{submission_id}` | pub/sub channel | Live status fan-out to the browser |
 | `session:{sha256 of token}` | string with TTL | Session read cache (PostgreSQL is the source of truth) |
 | `login_fail:id:{login_id}`, `login_fail:ip:{ip}` | counter with TTL | Failed-login counts (FR-AUTH-08) |
-| `rl:*` | string with TTL | Submission rate limits |
+| `rl:submit:{user_id}`, `rl:question:{user_id}`, `rl:reply:{user_id}` | string with TTL | Rate limits: one submission per 10 s, one question or announcement per 30 s, one reply per 5 s |
 | `lb:cache` | string with TTL 5 s | Cached leaderboard |
 
 ## 6. API and judge integration
@@ -294,6 +296,8 @@ The paths below are backend paths; they are not versioned. The browser calls the
 | Submissions | `POST /problems/{slug}/submissions`, `GET /submissions?problem={slug}` (the caller's own, newest first), `GET /submissions/{id}` (`?student_view=true` gives staff the student shape), `GET /submissions/{id}/stream` (SSE) | Student: own only; staff: any single submission. The staff list of all submissions is `GET /admin/submissions` (Monitoring) |
 | Monitoring | `GET /admin/progress` (matrix), `GET /admin/submissions` (filters), `POST /admin/submissions/{id}/rejudge`, `POST /admin/submissions/{id}/requeue`, `GET /admin/export/scores.csv`, `GET /admin/export/submissions.csv` | Staff, admin |
 | Leaderboard | `GET /leaderboard` | All |
+| Clarifications | `GET/POST /problems/{slug}/clarifications`, `GET /clarifications` (staff: the queue, `?status=&problem=&kind=&page=&page_size=`; students: their own), `POST /clarifications` (course-wide announcement), `GET /clarifications/announcements`, `GET/PATCH/DELETE /clarifications/{id}`, `POST /clarifications/{id}/replies`, `PATCH/DELETE /clarifications/{id}/replies/{reply_id}` | All; students only on threads they may read (public or own, enabled problems) and only their own questions and replies; announcements, status, pin and visibility: staff, admin |
+| Notifications | `GET /notifications?page=&page_size=` (own, newest first, with `unread_count`), `GET /notifications/unread-count`, `PATCH /notifications/{id}` (`is_read`), `POST /notifications/read-all`, `DELETE /notifications/{id}`, `DELETE /notifications?read=true`; `POST /admin/notifications` (to one active student or all) | Own only; sending: staff, admin |
 | Meta | `GET /languages` (from a backend copy of the judge registry) | All |
 | Instance settings | `GET /settings` (submissions open, banner message, leaderboard mode), `GET /settings/time` (server clock and UTC offset, for the top bar), `PUT /admin/settings/submissions` (killswitch), `PUT /admin/settings/leaderboard` (live / hidden / frozen) | Read: all; killswitch: admin; leaderboard: staff, admin |
 
@@ -455,6 +459,7 @@ None remain; every question is settled in 8.3.
 | API paths and errors | Unversioned backend paths; errors are `detail` plus optional `code` | 6.1 |
 | Audit storage | The MongoDB `operation_logs` collection, written after the commit (an entry can be lost while MongoDB is down) | 5.1.1, NFR-SEC-09 |
 | Per-test results | The MongoDB `submission_reports` collection, one document per attempt; older attempts are kept | 5.1.1 |
+| Clarifications and notifications | MongoDB `clarifications` (replies embedded, changed one array element at a time) and `notifications` (TTL 90 days); a reply or announcement never fails because its notification could not be written | 5.1.1, 6.1 |
 | Migrations and tests | Alembic and the automated test suites are deferred past the MVP | NFR-OPS-04 |
 
 ### 8.4 Sources

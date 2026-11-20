@@ -43,14 +43,16 @@ src/app/api/<path>/route.ts  thin forwarders: `return forwardToBackend(request, 
 src/components/ui/           shadcn-generated primitives (badge, button, card, dialog, dropdown-menu, input, label, select,
                              sonner, switch, table, tabs, textarea)
 src/components/data-table/   <DataTable>: the shared TanStack Table v9 table (sorting, search, client-side pages; `serverPages` for a list paged by the backend)
-src/components/<feature>/    feature components (accounts/, auth/, home/, landing/, leaderboard/, logs/, nav/, problems/, progress/, staff/, students/, solve/, submissions/, settings/,
-                             theme/)
+src/components/<feature>/    feature components (accounts/, auth/, clarifications/, home/, landing/, leaderboard/, logs/, nav/, notifications/, problems/, progress/, staff/,
+                             students/, solve/, submissions/, settings/, theme/)
 src/app/(app)/manage/problems  staff problem list, /new (title + slug), /[id] (editor)
 src/app/(app)/problems       /problems (list with own scores), /[slug] (statement, editor, submit, live result, history;
                              staff see it as a preview)
 src/app/(app)/manage/progress  staff progress matrix (students × enabled problems), scores and submissions CSV links
 src/app/(app)/leaderboard    student standings (live, frozen snapshot or hidden); manage/leaderboard: staff live standings + mode switch
 src/app/(app)/submissions/[id]  one result report (student: own; staff: anyone's, with hidden-case details)
+src/app/(app)/manage/clarifications  staff queue of Q&A threads, announcements, send a notification
+src/app/(app)/notifications  own notifications (every role); the bell in the top nav is components/notifications/notification-bell.tsx
 src/lib/api.ts               browser client: fetch /api/*, ApiError, CSRF token handling, shared types
 src/lib/backend.ts           server-only: BACKEND_URL, forwardToBackend (header allowlist)
 src/lib/session.ts           server-only: checkSession(token) → valid | invalid | unknown
@@ -60,6 +62,7 @@ src/lib/use-api-error.ts     useApiError(): error → message to show, redirecti
 src/lib/notify.ts            notifySuccess/notifyError/notifyInfo: sonner toasts for the result of an action
 src/lib/sse.ts               useSubmissionProgress(): live judging status over SSE, polling if the stream fails
 src/lib/drafts.ts            code drafts in localStorage, keyed by user, problem and language
+src/lib/notification-events.ts  window event so the bell refreshes after a change on /notifications
 src/lib/theme.ts             light/dark theme: `.dark` on <html>, stored choice, pre-paint script for the root layout
 src/lib/use-is-dark.ts       useIsDark(): the current theme in a Client Component
 ```
@@ -75,7 +78,7 @@ src/lib/use-is-dark.ts       useIsDark(): the current theme in a Client Componen
 ## Adding things
 
 - **Page**: create `src/app/(app)/<route>/page.tsx` with a default export and `export const metadata: Metadata = { title: "…" }`. If only some roles should see it, add or adjust its `NAV_ITEMS` entry; that one entry controls both the nav link and proxy access for everything below the path. An `hrefByRole` target (such as `/manage/problems`) is a section too: only the roles mapped to it may open pages below it.
-- **Backend call**: add the route handler under `src/app/api/...` (one exported function per method), then add a typed wrapper in `lib/api.ts` with snake_case fields matching the backend Pydantic models. For a path with an id, use `forwardWithId` (it refuses anything but digits, so a segment like `..` cannot reach another backend route); for a problem slug, `forwardWithSlug`. For a long-lived response (SSE), pass `{ stream: true }` to `forwardToBackend`, or its 30 s timeout cuts the stream.
+- **Backend call**: add the route handler under `src/app/api/...` (one exported function per method), then add a typed wrapper in `lib/api.ts` with snake_case fields matching the backend Pydantic models. For a path with an id, use `forwardWithId` (it refuses anything but digits, so a segment like `..` cannot reach another backend route); for a problem slug, `forwardWithSlug`; for MongoDB ObjectIds (clarifications, replies, notifications), `forwardWithObjectIds`. For a long-lived response (SSE), pass `{ stream: true }` to `forwardToBackend`, or its 30 s timeout cuts the stream.
 - **Table of data**: render it with `<DataTable>` from `components/data-table/data-table.tsx` and columns from `createDataColumnHelper<Row>()` (usage in the file header), not a hand-written `<table>`. Keep the column list at module scope or in `useMemo`. The package is **TanStack Table v9** (`useTable`, `tableFeatures`), not v8: its guides are in `node_modules/@tanstack/react-table/skills/` and `node_modules/@tanstack/table-core/skills/`. A list too long to load whole passes `serverPages` and fetches each page itself (`logs/log-viewer.tsx`): sorting is then off and filters go in the request. The test case editor (`problems/test-case-editor.tsx`) is a form grid and stays a plain `<table>`.
 - **Server-only data**: Server Components can read the session with `cookies()` + `checkSession()` (see `top-nav.tsx`). With `cacheComponents`, anything that reads cookies or headers must render inside a `<Suspense>` boundary with a fallback that matches the layout.
 
@@ -88,7 +91,7 @@ src/lib/use-is-dark.ts       useIsDark(): the current theme in a Client Componen
 - **Error codes**: some backend errors carry a `code`, exposed as `ApiError.code` (for example `rate_limited`). Branch on the code or the status, never on the message text.
 - **Effects that fetch**: guard them with a `cancelled` flag in the cleanup, and handle `ApiError` with status 401 by redirecting with `router.replace("/login…")` (`useApiError` does this). Call `setState` only in the promise callbacks: the lint rules reject it in the effect body, and reject reading or writing a ref during render.
 - **Dynamic route params in a Client Component**: read them with `useParams()` and render the component inside `<Suspense>` in the page (see `manage/problems/[id]/page.tsx`).
-- **Markdown**: render it only through `components/problems/markdown-view.tsx` (sanitised, no raw HTML, KaTeX), so previews and student views match.
+- **Markdown**: render it only through `components/problems/markdown-view.tsx` (sanitised, no raw HTML, KaTeX), so previews and student views match. Text any user wrote (clarification threads) passes `userContent`, which also drops images hosted on other sites.
 - **Data fetching**: there is no query library. Fetch in an effect through `lib/api.ts`, keep the result in state, and after a change set that state from the response or fetch again. A hidden page re-runs its effects when it is shown again, which is what keeps scores and history fresh. `getLeaderboard()` is the one exception: it keeps the last body and ETag in memory, sends `If-None-Match`, and on a 304 returns the same object, so polling an unchanged board does not re-render. `request()` lets a 304 through for this, and `forwardToBackend` forwards `if-none-match`.
 - **Client providers in `components/nav/app-shell.tsx` go beside `<TopNav />`, not around it**: wrapped in a client component, its session lookup fails the dev prerender check ("unstable value `Date.now()`").
 - **`TopNav` awaits `connection()` after `cookies()`**: with `partialPrefetching`, `cookies()` alone resolves in the runtime-prefetch stage, where the dev prerender check still reports a clock read under the session lookup as "unstable value `Date.now()`" (intermittently, pointing at `<TopNav />`). A Server Component that reads the session the same way needs the same line.
