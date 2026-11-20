@@ -7,7 +7,8 @@ run in a thread, because the services use sync SQLAlchemy, redis-py and boto3.
 The API enqueues ``start_build`` and ``assemble_package`` (``services/jobs.py``)
 so they start at once; the ``flush_outbox`` and ``resume_builds`` crons re-send
 and resume whatever was lost, and ``detect_delayed`` flags submissions the
-judge has not finished in 15 minutes. Every job here is safe to run twice.
+judge has not finished in 15 minutes. ``sweep_orphans`` deletes unused
+statement images once a week. Every job here is safe to run twice.
 
 The schema is created by ``main.py``: start the API once before the worker on
 an empty database.
@@ -27,8 +28,9 @@ import db.models.problem  # noqa: F401
 import db.models.student_import  # noqa: F401
 import db.models.submission  # noqa: F401
 import db.models.user  # noqa: F401
+from config import settings
 from db.postgres import SessionLocal
-from services import judge, packages, submissions
+from services import judge, packages, submissions, sweep
 from services.jobs import redis_settings
 
 logger = logging.getLogger(__name__)
@@ -82,6 +84,19 @@ async def detect_delayed(ctx: dict[str, Any]) -> None:
     await asyncio.to_thread(_detect_delayed)
 
 
+def _sweep_orphans() -> None:
+    if not settings.orphan_sweep_enabled:
+        logger.info("orphan sweep skipped: ORPHAN_SWEEP_ENABLED is false")
+        return
+    with SessionLocal() as db:
+        sweep.sweep_images(db)
+
+
+async def sweep_orphans(ctx: dict[str, Any]) -> None:
+    """Delete statement images nothing links to, and image files with no row."""
+    await asyncio.to_thread(_sweep_orphans)
+
+
 async def _quiet_cron_logs(ctx: dict[str, Any]) -> None:
     # arq logs the start and end of every job at INFO, which for the 5 s crons is
     # four lines every 5 s; the services log what actually happened.
@@ -96,6 +111,8 @@ class WorkerSettings:
         cron(flush_outbox, second=EVERY_5_SECONDS),
         cron(resume_builds, second=EVERY_5_SECONDS),
         cron(detect_delayed, second=0),
+        # Weekly and at night: it reads every statement and lists the bucket
+        cron(sweep_orphans, weekday="sun", hour=3, minute=0, second=0),
     ]
     redis_settings = redis_settings()
     # Package jobs hold whole test files in memory (up to 8 MiB each)

@@ -45,14 +45,15 @@ routers/settings.py     GET /settings: killswitch state, banner message, leaderb
 routers/leaderboard.py  GET /leaderboard: standings shaped per viewer (students: no login ids, snapshot while frozen, 403 leaderboard_hidden)
 routers/progress.py     GET /admin/progress (staff, admin): the progress matrix; GET /admin/export/scores.csv: the same as CSV
 routers/internal.py     /internal/* for the judge worker (bearer token): judge-events, judge-jobs/{id}/refresh
-worker.py               arq WorkerSettings: start_build, assemble_package jobs + flush_outbox, resume_builds, detect_delayed crons
+worker.py               arq WorkerSettings: start_build, assemble_package jobs + flush_outbox, resume_builds, detect_delayed, sweep_orphans (weekly) crons
 services/auth.py        current_session / CurrentSession / require_role(...) dependencies + CSRF check
 services/session.py     session create/lookup/revoke; Postgres is the source of truth, Redis is a read cache
 services/rate_limit.py  Redis rate limits: failed-login counters (per login id, per client IP) and the 10 s submit slot per user
 services/errors.py      ApiError: an HTTPException whose body also carries a machine-readable `code`
 services/operation_log.py  log_operation / log_operation_now: MongoDB operation_logs, written by an after_commit hook
 services/reports.py     MongoDB submission_reports: one document per attempt with per-test results and the compile log
-services/storage.py     boto3 S3 client: put/get/size/stream, presigned URLs; raises StorageError (503 via main.py)
+services/storage.py     boto3 S3 client: put/get/size/stream/list/delete, presigned URLs; raises StorageError (503 via main.py)
+services/sweep.py       weekly orphan sweep of statement images: unlinked rows, then files with no row (24 h grace)
 services/packages.py    problem.yaml, staging/final package zips, the three build steps (start, record result, assemble)
 services/judge.py       job ids (ULID), Redis stream push, judge_outbox relay, batched send for a rejudge
 services/jobs.py        enqueue(): hand a job to the arq worker from sync code (best effort)
@@ -92,7 +93,8 @@ Imports are absolute from the backend root (`from db.models.user import User`, `
 - **Single worker**: `main.py` sets up the schema at import time, so the production image runs `--workers 1`. Don't raise it until schema setup moves to a migration step.
 - **Versions are immutable**: never change a `ProblemVersion` or its test cases after creation, except `TestCase.hint_md` and the build columns the build steps fill in. A judge-relevant change is a new version (`routers/problems.py` `_same_judging` decides).
 - **`current_version_id` moves only in `packages.assemble_package`**, and only forward, so students keep the last good version while a build is pending or failed.
-- **Storage order**: upload first, then commit the row; delete the row and leave the file to the orphan sweep. Objects are never overwritten.
+- **Storage order**: upload first, then commit the row; delete the row and leave the file to the orphan sweep. Objects are never overwritten, and only `services/sweep.py` deletes them.
+- **Image links are how the sweep knows an image is used**: it keeps an image only if some `statement_md` or `hint_md` contains `/images/{id}`. If you add another place where Markdown can link an image, add that column to `services/sweep.py` `_linked_ids`, or its images get deleted 24 h after upload.
 - **Background jobs must be resumable**: `enqueue()` may silently fail, so every job needs a database state the `resume_builds` cron can find, and must be safe to run twice (lock the row, return if already done).
 - **Judging again goes through `services/submissions.py`** (`rejudge`, `requeue`, `rejudge_problem`): lock the submission, new `job_id`, next `attempt`, current version, new outbox row. Never reuse a `job_id` or reset a submission by hand. The old score stays until the new result arrives.
 - **`/internal/*` never answers 4xx** except 401 and 409: the judge drops an event on any other 4xx and retries on 5xx.

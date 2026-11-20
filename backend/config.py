@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     s3_region: str = "us-east-1"
     s3_bucket_assets: str = "assets"
     s3_bucket_problems: str = "problems"
+    # Weekly deletion of statement images nothing links to (services/sweep.py).
+    # Turn it off while a restored backup is being checked.
+    orphan_sweep_enabled: bool = True
 
     # --- judge ---
     # Bearer token the judge worker sends to /internal/*. Empty = every

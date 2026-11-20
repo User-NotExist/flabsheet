@@ -353,7 +353,7 @@ Two RustFS buckets hold every file; the browser never gets storage credentials o
 
 | Key | Bucket | Content | Written by | Read by | Cap | Changes? |
 | --- | --- | --- | --- | --- | --- | --- |
-| `images/{problem_id}/{uuid}.{ext}` | `assets` | Statement images | API (staff upload) | Browser, via `GET /images/{id}` on the API (`/api/images/{id}` from the browser), which streams the bytes. No redirect: RustFS is not reachable from the internet | 5 MB | Never |
+| `images/{problem_id}/{uuid}.{ext}` | `assets` | Statement images | API (staff upload) | Browser, via `GET /images/{id}` on the API (`/api/images/{id}` from the browser), which streams the bytes. No redirect: RustFS is not reachable from the internet | 5 MB | Never; deleted by the orphan sweep once no statement or hint links it |
 | `testdata/{sha256}.in` | `problems` | Test inputs, shared across versions | API | API (package build) | 8 MB | Never (content-addressed) |
 | `reference/{version_id}/main.{ext}` | `problems` | Reference solution | API | Judge, presigned GET in the build job | 64 KB | Never |
 | `staging/{sha256}.zip` | `problems` | Package without answers | API | Judge (read-only key) | — | Never |
@@ -376,11 +376,15 @@ PostgreSQL, MongoDB and RustFS cannot share a transaction (the MongoDB write ord
 2. **Delete the row first, then the file.** Files are never deleted inline; the sweep below removes them.
 3. **Content-addressed keys** (`testdata/`, `staging/`, `packages/`) make retries harmless: the same bytes land on the same key.
 4. **Verify hashes** where data crosses a boundary: the judge checks sources and packages; the API checks each answer against `build_done` before building the final package.
-5. **Orphan sweep** (weekly background job): list each prefix and delete objects older than 24 h that no row references. The 24 h gap protects uploads still in progress.
+5. **Orphan sweep** (weekly background job, `sweep_orphans`): delete objects older than 24 h that no row references. The 24 h gap protects uploads still in progress. Only `images/` is swept so far; the other prefixes are listed here as planned.
+   - **Images, pass 1: unlinked rows.** An `images` row older than 24 h whose id no `/images/{id}` link names, in any problem's `statement_md` or any test case's `hint_md`, is deleted. Every problem's text counts, because a statement copied from another problem keeps that problem's links. The 24 h gap also protects an image inserted in an editor that has not been saved yet.
+   - **Images, pass 2: files with no row.** An object under `images/` older than 24 h whose key no `images.object_key` holds is deleted. This removes the files of pass 1, of deleted problems (their rows cascade away) and of uploads that failed before the row was inserted.
+   - The passes run in this order, so the rule above holds: row first, then file.
+   - `ORPHAN_SWEEP_ENABLED=false` (backend `.env`) turns the job off.
 
 ## Backups and restore
 
-Back up PostgreSQL, MongoDB and both buckets daily; restore the databases first and keep the orphan sweep off until the restore is checked.
+Back up PostgreSQL, MongoDB and both buckets daily; restore the databases first and keep the orphan sweep off (`ORPHAN_SWEEP_ENABLED=false`) until the restore is checked. A restored database that is older than the buckets would otherwise make newer images look orphaned.
 
 | What | How | Kept |
 | --- | --- | --- |
@@ -394,6 +398,6 @@ Restore order:
 1. Stop the API and the worker.
 2. Restore PostgreSQL to the chosen time, and MongoDB from the same night (`mongorestore --drop`). Log entries and reports newer than the dump are lost; a submission whose report is missing shows no per-test results until it is rejudged.
 3. Restore both buckets from the same night or later. Extra newer files are harmless; missing files are not.
-4. Start the API, check a problem page, a package build and an old submission's source, then re-enable the sweep job.
+4. Start the API, check a problem page, a package build and an old submission's source, then re-enable the sweep job (`ORPHAN_SWEEP_ENABLED=true`, restart the worker).
 
 Run this once on staging before launch.
