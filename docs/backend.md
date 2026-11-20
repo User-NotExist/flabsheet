@@ -132,7 +132,7 @@ The worker process runs these; each is safe to run twice.
 | `detect_delayed` | Every minute | Marks submissions with no `done` 15 min after their current job was queued as `delayed` (FR-JDG-05; the outbox row's time, so a rejudged submission is not flagged at once). The job stays queued, so a late result still finishes the submission |
 | `refresh_leaderboard` | After `done`, debounced 5 s | Rebuilds the cached leaderboard |
 | `cleanup_streams` | Every hour | Removes empty judge streams from `judge:streams:{lane}` after 1 h idle |
-| `sweep_orphans` | Weekly | Deletes storage objects older than 24 h that no database row references ([data-and-storage.md](data-and-storage.md)) |
+| `sweep_orphans` | Weekly (Sunday 03:00) | Images only so far: deletes `images` rows older than 24 h that no statement or hint links, then `images/` objects older than 24 h with no row ([data-and-storage.md](data-and-storage.md)). Off when `ORPHAN_SWEEP_ENABLED=false` |
 
 ## Security, testing and done
 

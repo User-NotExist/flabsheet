@@ -12,13 +12,16 @@ a 503, so callers only catch it when they have something better to do.
     storage.put_bytes(storage.PROBLEMS, "testdata/ab12.in", data, "application/octet-stream")
     size = storage.size(storage.PROBLEMS, "testdata/ab12.in")   # None when missing
     url = storage.presign_get(storage.PROBLEMS, "reference/7/main.cpp")
+
+Nothing deletes objects except the orphan sweep (``services/sweep.py``).
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from functools import lru_cache
-from typing import Any, BinaryIO, Iterator, Optional
+from typing import Any, BinaryIO, Iterable, Iterator, Optional
 
 import boto3
 from fastapi import Request
@@ -136,6 +139,45 @@ def stream(bucket: str, key: str) -> Iterator[bytes]:
     except (BotoCoreError, ClientError) as exc:
         raise StorageError(f"get {bucket}/{key} failed") from exc
     return body.iter_chunks(64 * 1024)
+
+
+def list_objects(bucket: str, prefix: str) -> Iterator[tuple[str, datetime]]:
+    """``(key, last_modified)`` of every object under ``prefix``, page by page."""
+    try:
+        for page in _client().get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                yield obj["Key"], obj["LastModified"]
+    except (BotoCoreError, ClientError) as exc:
+        raise StorageError(f"list {bucket}/{prefix} failed") from exc
+
+
+# S3 accepts at most 1000 keys per DeleteObjects request
+_DELETE_BATCH = 1000
+
+
+def delete_objects(bucket: str, keys: Iterable[str]) -> None:
+    """Delete objects; missing keys are not an error. Only the orphan sweep calls this."""
+    batch: list[str] = []
+    for key in keys:
+        batch.append(key)
+        if len(batch) == _DELETE_BATCH:
+            _delete_batch(bucket, batch)
+            batch = []
+    if batch:
+        _delete_batch(bucket, batch)
+
+
+def _delete_batch(bucket: str, keys: list[str]) -> None:
+    try:
+        result = _client().delete_objects(
+            Bucket=bucket, Delete={"Objects": [{"Key": k} for k in keys], "Quiet": True}
+        )
+    except (BotoCoreError, ClientError) as exc:
+        raise StorageError(f"delete from {bucket} failed") from exc
+    # DeleteObjects answers 200 even when single keys fail
+    errors = result.get("Errors", [])
+    if errors:
+        raise StorageError(f"delete from {bucket} failed for {len(errors)} keys, e.g. {errors[0].get('Key')}")
 
 
 def presign_get(bucket: str, key: str) -> str:
