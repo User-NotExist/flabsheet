@@ -151,7 +151,8 @@ class ClarificationCreate(BaseModel):
     kind: Kind = "question"
     title: Title
     body_md: Body
-    # Questions start private: the author and staff only. Announcements are public.
+    # Questions start private: the author and staff only. Only staff may send
+    # "public"; announcements are always public.
     visibility: Visibility = "private"
     tags: Tags = Field(default_factory=list)
 
@@ -222,8 +223,8 @@ class _Shaper:
                     body_md=reply["body_md"],
                     created_at=reply["created_at"],
                     edited_at=reply.get("edited_at"),
-                    can_edit=rules.can_change_reply(reply, self.session),
-                    can_delete=rules.can_change_reply(reply, self.session),
+                    can_edit=rules.can_edit_reply(doc, reply, self.session),
+                    can_delete=rules.can_delete_reply(reply, self.session),
                 )
                 for reply in doc.get("replies") or []
             ],
@@ -286,11 +287,18 @@ def _rate_limited(retry_after: int, what: str) -> ApiError:
     )
 
 
+_PUBLIC_FROZEN = (
+    "Staff made this question public, so it can no longer change. Ask a new question to follow up."
+)
+
+
 def _cannot(doc: dict[str, Any], session: SessionData, action: str) -> HTTPException:
     """Why a student may not edit or delete a thread they can read: 403 when it
     is not theirs, 409 when it is but its state no longer allows it."""
     if doc["author_id"] != session.user_id or doc["kind"] != "question":
         return HTTPException(status.HTTP_403_FORBIDDEN, f"You can only {action} your own questions")
+    if action == "edit" and doc["visibility"] == "public":
+        return HTTPException(status.HTTP_409_CONFLICT, _PUBLIC_FROZEN)
     if action == "delete":
         return HTTPException(
             status.HTTP_409_CONFLICT, "A question with replies can no longer be deleted."
@@ -368,6 +376,9 @@ def create_problem_clarification(
     problem = get_solvable_problem(db, session, slug)
     if body.kind == "announcement" and not rules.is_staff(session):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only staff can post announcements")
+    if body.visibility == "public" and not rules.is_staff(session):
+        # Staff read a question before every student can (services/clarifications.py)
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only staff can make a question public")
     retry_after = question_retry_after(session.user_id)
     if retry_after:
         raise _rate_limited(retry_after, "questions")
@@ -557,6 +568,8 @@ def create_reply(clarification_id: str, body: ReplyIn, session: CurrentSession, 
         raise HTTPException(status.HTTP_409_CONFLICT, "This thread has reached its reply limit.")
     if not rules.permissions(current, session)["reply"]:
         if current["author_id"] == session.user_id and current["kind"] == "question":
+            if current["visibility"] == "public":
+                raise HTTPException(status.HTTP_409_CONFLICT, _PUBLIC_FROZEN)
             raise HTTPException(status.HTTP_409_CONFLICT, "This question is closed.")
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You can only reply to your own questions")
     retry_after = reply_retry_after(session.user_id)
@@ -582,7 +595,8 @@ def create_reply(clarification_id: str, body: ReplyIn, session: CurrentSession, 
         rules.reply_filter(oid, session), update, return_document=ReturnDocument.AFTER
     )
     if updated is None:
-        # The thread changed between the read and the write (closed, full or deleted)
+        # The thread changed between the read and the write (closed, made public,
+        # full or deleted)
         raise HTTPException(status.HTTP_409_CONFLICT, "This thread can no longer take replies.")
 
     notified = 0
@@ -608,17 +622,24 @@ def create_reply(clarification_id: str, body: ReplyIn, session: CurrentSession, 
 def update_reply(
     clarification_id: str, reply_id: str, body: ReplyIn, session: CurrentSession, db: Db
 ):
-    """Edit one reply: your own, or any as staff. Only that array element changes."""
+    """Edit one reply: your own on a private thread, or any as staff. Only that
+    array element changes."""
     oid = rules.parse_id(clarification_id)
     rid = rules.parse_id(reply_id, "Reply")
-    rules.find_visible(db, session, oid)
+    current = rules.find_visible(db, session, oid)
     now = datetime.now(timezone.utc)
     updated = clarifications().find_one_and_update(
-        rules.reply_element_filter(oid, rid, session),
+        rules.reply_element_filter(oid, rid, session, edit=True),
         {"$set": {"replies.$.body_md": body.body_md, "replies.$.edited_at": now, "updated_at": now}},
         return_document=ReturnDocument.AFTER,
     )
     if updated is None:
+        own = any(
+            reply["_id"] == rid and reply["author_id"] == session.user_id
+            for reply in current.get("replies") or []
+        )
+        if own and current["visibility"] == "public" and not rules.is_staff(session):
+            raise HTTPException(status.HTTP_409_CONFLICT, _PUBLIC_FROZEN)
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Reply not found")
     log_operation_now(
         "clarification.reply_update",
@@ -636,7 +657,7 @@ def delete_reply(clarification_id: str, reply_id: str, session: CurrentSession, 
     rid = rules.parse_id(reply_id, "Reply")
     rules.find_visible(db, session, oid)
     updated = clarifications().find_one_and_update(
-        rules.reply_element_filter(oid, rid, session),
+        rules.reply_element_filter(oid, rid, session, edit=False),
         {"$pull": {"replies": {"_id": rid}}, "$set": {"updated_at": datetime.now(timezone.utc)}},
         return_document=ReturnDocument.AFTER,
     )

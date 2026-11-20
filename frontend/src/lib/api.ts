@@ -939,6 +939,7 @@ export type NewClarification = {
   kind?: ClarificationKind;
   title: string;
   body_md: string;
+  /** Staff and admins only: a student's question is always private. */
   visibility?: ClarificationVisibility;
   tags?: string[];
 };

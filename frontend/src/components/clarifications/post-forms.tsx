@@ -199,7 +199,7 @@ export function ThreadForm({
               checked={visibility === "public"}
               onChange={() => setVisibility("public")}
             />
-            Every student (don&apos;t post your code)
+            Every student
           </label>
         </fieldset>
       )}

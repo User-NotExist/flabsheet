@@ -21,9 +21,14 @@ Who may do what (the backend enforces all of it; the UI only reads
 
 - A student reads public threads and their own, and only on problems they can
   see now (enabled), like ``routers/solve.py``: anything else answers 404.
+- A student's question is always created private. Only staff make a thread
+  public, after reading it: a student could otherwise publish a solution to
+  every other student.
 - A student edits their own question while it is ``open`` with no staff reply,
   deletes it while it has no replies at all, replies to it unless ``closed``,
-  and edits or deletes their own replies.
+  edits their own replies and deletes them. All of that but deleting needs the
+  thread to be private: once staff publish it, its student content is frozen,
+  so what staff checked is what everyone reads (a follow-up is a new question).
 - Staff and admins do all of that on any thread, and also post announcements,
   set the status, pin and change the visibility.
 
@@ -120,16 +125,25 @@ def permissions(doc: Mapping[str, Any], session: SessionData) -> dict[str, bool]
     if is_staff(session):
         return {"edit": True, "delete": True, "reply": True, "moderate": True}
     own = doc.get("author_id") == session.user_id and doc.get("kind") == "question"
+    # Writes that add or change student text need a private thread (see the top)
+    writable = own and doc.get("visibility") == "private"
     replies = doc.get("replies") or []
     return {
-        "edit": own and doc.get("status") == "open" and not _has_staff_reply(doc),
+        "edit": writable and doc.get("status") == "open" and not _has_staff_reply(doc),
         "delete": own and not replies,
-        "reply": own and doc.get("status") != "closed" and len(replies) < MAX_REPLIES,
+        "reply": writable and doc.get("status") != "closed" and len(replies) < MAX_REPLIES,
         "moderate": False,
     }
 
 
-def can_change_reply(reply: Mapping[str, Any], session: SessionData) -> bool:
+def can_edit_reply(doc: Mapping[str, Any], reply: Mapping[str, Any], session: SessionData) -> bool:
+    if is_staff(session):
+        return True
+    return reply.get("author_id") == session.user_id and doc.get("visibility") == "private"
+
+
+def can_delete_reply(reply: Mapping[str, Any], session: SessionData) -> bool:
+    # Removing text never publishes anything, so a public thread allows it
     return is_staff(session) or reply.get("author_id") == session.user_id
 
 
@@ -142,6 +156,7 @@ def student_edit_filter(clarification_id: ObjectId, session: SessionData) -> dic
         "_id": clarification_id,
         "author_id": session.user_id,
         "kind": "question",
+        "visibility": "private",
         "status": "open",
         "replies.role": {"$nin": _STAFF_ROLE_VALUES},
     }
@@ -159,19 +174,27 @@ def reply_filter(clarification_id: ObjectId, session: SessionData) -> dict[str, 
         f"replies.{MAX_REPLIES - 1}": {"$exists": False},
     }
     if not is_staff(session):
-        query.update(author_id=session.user_id, kind="question", status={"$ne": "closed"})
+        query.update(
+            author_id=session.user_id,
+            kind="question",
+            visibility="private",
+            status={"$ne": "closed"},
+        )
     return query
 
 
 def reply_element_filter(
-    clarification_id: ObjectId, reply_id: ObjectId, session: SessionData
+    clarification_id: ObjectId, reply_id: ObjectId, session: SessionData, *, edit: bool
 ) -> dict[str, Any]:
-    """The thread holding a reply the caller may change. ``$elemMatch`` makes
-    the positional ``replies.$`` point at that very reply."""
+    """The thread holding a reply the caller may edit (``edit=True``) or delete.
+    ``$elemMatch`` makes the positional ``replies.$`` point at that very reply."""
     element: dict[str, Any] = {"_id": reply_id}
+    query: dict[str, Any] = {"_id": clarification_id, "replies": {"$elemMatch": element}}
     if not is_staff(session):
         element["author_id"] = session.user_id
-    return {"_id": clarification_id, "replies": {"$elemMatch": element}}
+        if edit:
+            query["visibility"] = "private"
+    return query
 
 
 # --- reads across databases --------------------------------------------------
