@@ -2,7 +2,7 @@
 
 import { PinIcon, PinOffIcon } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { FormError } from "@/components/auth/form-error";
 import { AuthorName, STATUS_LABELS, ThreadBadges } from "@/components/clarifications/badges";
@@ -46,6 +46,8 @@ const STATUS_ITEMS = (Object.keys(STATUS_LABELS) as ClarificationStatus[]).map((
   label: STATUS_LABELS[value],
 }));
 
+const REFRESH_MS = 30_000;
+
 type Editing = { kind: "thread" } | { kind: "reply"; id: string } | null;
 type Confirm = { kind: "thread" } | { kind: "reply"; id: string } | null;
 
@@ -57,16 +59,21 @@ type Confirm = { kind: "thread" } | { kind: "reply"; id: string } | null;
  *   <ThreadView id={thread.id} onChange={updateRow} onDelete={dropRow} />
  *
  * `onChange` gets the thread after each change, `onDelete` runs once it is gone.
+ * `live` re-reads the thread every 30 s while the tab is visible, so replies
+ * from others appear without reopening it (the staff queue sets it).
  */
 export function ThreadView({
   id,
   showProblem = false,
+  live = false,
   onChange,
   onDelete,
 }: {
   id: string;
   /** Link to the problem (the staff queue spans every problem). */
   showProblem?: boolean;
+  /** Re-read the thread in the background. */
+  live?: boolean;
   onChange?: (thread: Clarification) => void;
   onDelete?: () => void;
 }) {
@@ -77,6 +84,9 @@ export function ThreadView({
   const [editing, setEditing] = useState<Editing>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [busy, setBusy] = useState(false);
+  // Counts changes made here: a background read that started before one
+  // returns an older thread than the change did, so it is dropped
+  const changes = useRef(0);
 
   useLayoutEffect(() => () => {
     setEditing(null);
@@ -100,11 +110,38 @@ export function ThreadView({
     };
   }, [id, revision, toMessage]);
 
+  useEffect(() => {
+    if (!live) return;
+    let cancelled = false;
+    const poll = () => {
+      // A background tab would only add load; it catches up when shown again
+      if (document.hidden) return;
+      const seen = changes.current;
+      getClarification(id)
+        .then((found) => {
+          if (cancelled || changes.current !== seen) return;
+          setThread(found);
+          setError(null);
+        })
+        .catch(() => {
+          // A missed poll is retried by the next tick; the thread stays as shown
+        });
+    };
+    const timer = setInterval(poll, REFRESH_MS);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", poll);
+    };
+  }, [id, live]);
+
   /** Run a change, show the thread it returns, and say how it went. */
   async function apply(change: () => Promise<Clarification>, done: string): Promise<boolean> {
     setBusy(true);
     try {
       const next = await change();
+      changes.current += 1;
       setThread(next);
       onChange?.(next);
       notifySuccess(done);
@@ -134,6 +171,7 @@ export function ThreadView({
         return;
       }
       const next = await deleteReply(id, target.id);
+      changes.current += 1;
       setThread(next);
       onChange?.(next);
       notifySuccess("Reply deleted.");
