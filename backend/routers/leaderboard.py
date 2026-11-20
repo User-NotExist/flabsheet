@@ -7,7 +7,10 @@ freeze time, or a 403 (code ``leaderboard_hidden``) while it is hidden. Their
 rows carry no student id or login id (FR-STD-03); ``is_me`` marks their own.
 
 Staff and admins always get the live standings with login ids, plus the mode
-students are in. The mode itself is changed with
+students are in.
+
+Pages poll this, so the response carries an ETag (``services/etag.py``) and a
+request with a matching ``If-None-Match`` gets an empty 304. The mode itself is changed with
 ``PUT /admin/settings/leaderboard`` (routers/settings.py).
 """
 
@@ -16,7 +19,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DbSession
 
@@ -25,6 +28,7 @@ from db.models.user import UserRole
 from db.postgres import get_database
 from services import leaderboard
 from services.auth import CurrentSession
+from services.etag import etag_json
 from services.errors import ApiError
 
 router = APIRouter(prefix="/leaderboard", tags=["leaderboard"])
@@ -52,7 +56,7 @@ class LeaderboardOut(BaseModel):
 
 
 @router.get("", response_model=LeaderboardOut)
-def get_leaderboard(session: CurrentSession, db: Db):
+def get_leaderboard(request: Request, session: CurrentSession, db: Db):
     settings_row = db.get(InstanceSettings, 1)
     assert settings_row is not None  # seeded when the table is created
     mode = settings_row.leaderboard_mode
@@ -83,9 +87,10 @@ def get_leaderboard(session: CurrentSession, db: Db):
         )
         for row in standings
     ]
-    return LeaderboardOut(
+    out = LeaderboardOut(
         mode=mode,
         frozen_at=settings_row.leaderboard_frozen_at if mode is LeaderboardMode.frozen else None,
         showing_snapshot=showing_snapshot,
         rows=rows,
     )
+    return etag_json(request, out)
