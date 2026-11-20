@@ -56,6 +56,11 @@ export function problemSlug(value: string): string | null {
   return /^[a-z0-9-]{1,64}$/i.test(value) ? value : null;
 }
 
+/** A MongoDB ObjectId (24 hex digits), or null when it is anything else. */
+export function objectId(value: string): string | null {
+  return /^[a-f0-9]{24}$/i.test(value) ? value : null;
+}
+
 const NOT_FOUND = () => Response.json({ detail: "Not found" }, { status: 404 });
 
 /**
@@ -82,6 +87,23 @@ export function forwardWithSlug(
 ): Promise<Response> | Response {
   const safe = problemSlug(slug);
   return safe === null ? NOT_FOUND() : forwardToBackend(request, path(safe));
+}
+
+/**
+ * Forward to a backend path built from MongoDB ObjectIds (clarifications,
+ * replies, notifications), e.g.
+ * `forwardWithObjectIds(request, [id, replyId], ([id, reply]) => `/clarifications/${id}/replies/${reply}`)`.
+ * Like `forwardWithId`, anything but an id answers 404 here.
+ */
+export function forwardWithObjectIds(
+  request: Request,
+  ids: readonly string[],
+  path: (ids: string[]) => string,
+): Promise<Response> | Response {
+  const safe = ids.map(objectId);
+  return safe.some((id) => id === null)
+    ? NOT_FOUND()
+    : forwardToBackend(request, path(safe as string[]));
 }
 
 /**
