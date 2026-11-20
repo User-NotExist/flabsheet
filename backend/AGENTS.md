@@ -2,7 +2,7 @@
 
 **Never read `backend/.env`.** Use `.env.example` and `config.py` to see which settings exist. Also read the root [AGENTS.md](../AGENTS.md).
 
-FastAPI service, Python 3.12, managed with **uv**. It uses sync SQLAlchemy 2.x (psycopg 3) on PostgreSQL, sync pymongo on MongoDB (the operation log and the submission reports only) and sync redis-py. Passwords are hashed with argon2. RustFS/S3 goes through sync `boto3` (`services/storage.py`). Background jobs run in a second process, an **arq** worker (`worker.py`).
+FastAPI service, Python 3.12, managed with **uv**. It uses sync SQLAlchemy 2.x (psycopg 3) on PostgreSQL, sync pymongo on MongoDB (the operation log, submission reports, clarification threads and notifications) and sync redis-py. Passwords are hashed with argon2. RustFS/S3 goes through sync `boto3` (`services/storage.py`). Background jobs run in a second process, an **arq** worker (`worker.py`).
 
 ## Commands
 
@@ -26,7 +26,7 @@ config.py               pydantic-settings `Settings`; module-level `settings` si
 cli.py                  management CLI (argparse subcommands): seed-admin, seed-students, migrate-to-mongo (copies the old Postgres log/results; --drop-old drops them after a verified copy)
 db/postgres.py          engine, SessionLocal, Base, get_database() dependency
 db/redis.py             shared redis_client (decode_responses=True, 2 s timeouts), get_redis()
-db/mongo.py             shared mongo_client (2 s timeouts, tz_aware), operation_logs() / submission_reports() collections, ensure_indexes(), mongo_error_handler
+db/mongo.py             shared mongo_client (2 s timeouts, tz_aware), operation_logs() / submission_reports() / clarifications() / notifications() collections, ensure_indexes() (with the 90-day notification TTL), mongo_error_handler
 db/models/user.py       User, Session (login sessions), UserRole enum
 db/models/student_import.py StudentImport (bulk import runs; never stores passwords)
 db/models/problem.py    Problem, ProblemVersion, ProblemLanguage, TestCase, Image + ProblemStatus/BuildStatus/TestCaseVisibility enums
@@ -44,16 +44,22 @@ routers/settings.py     GET /settings: killswitch state, banner message, leaderb
                         PUT /admin/settings/leaderboard (staff, admin): live / hidden / frozen, freezing stores a snapshot
 routers/leaderboard.py  GET /leaderboard: standings shaped per viewer (students: no login ids, snapshot while frozen, 403 leaderboard_hidden)
 routers/progress.py     GET /admin/progress (staff, admin): the progress matrix; GET /admin/export/scores.csv: the same as CSV
+routers/clarifications.py  /problems/{slug}/clarifications and /clarifications: Q&A threads, replies, announcements (MongoDB);
+                        a staff reply answers the question and notifies its author, an announcement notifies every active student
+routers/notifications.py   /notifications (each user's own: list, unread count, read/unread, read-all, dismiss, clear read);
+                        POST /admin/notifications (staff, admin): send to one active student or all
 routers/internal.py     /internal/* for the judge worker (bearer token): judge-events, judge-jobs/{id}/refresh
 worker.py               arq WorkerSettings: start_build, assemble_package jobs + flush_outbox, resume_builds, detect_delayed, sweep_orphans (weekly) crons
 services/auth.py        current_session / CurrentSession / require_role(...) dependencies + CSRF check
 services/session.py     session create/lookup/revoke; Postgres is the source of truth, Redis is a read cache
-services/rate_limit.py  Redis rate limits: failed-login counters (per login id, per client IP) and the 10 s submit slot per user
+services/rate_limit.py  Redis rate limits: failed-login counters (per login id, per client IP), the 10 s submit slot, the 30 s question and 5 s reply slots per user
 services/cache_control.py  DefaultNoStoreMiddleware: `Cache-Control: private, no-store` unless the route sets its own
 services/etag.py        etag_json(request, model): JSON with an ETag over the exact body, empty 304 on a matching If-None-Match (GET /leaderboard)
 services/errors.py      ApiError: an HTTPException whose body also carries a machine-readable `code`
 services/operation_log.py  log_operation / log_operation_now: MongoDB operation_logs, written by an after_commit hook
 services/reports.py     MongoDB submission_reports: one document per attempt with per-test results and the compile log
+services/clarifications.py  MongoDB clarifications: who may read and change a thread (read_filter, permissions, atomic write filters), batched author lookup
+services/notifications.py   MongoDB notifications: notify() (one insert_many, best effort), active_student_ids()
 services/storage.py     boto3 S3 client: put/get/size/stream/list/delete, presigned URLs; raises StorageError (503 via main.py)
 services/images.py      strip_metadata: re-encode an uploaded image with Pillow without EXIF/XMP/comments (orientation applied, pixel caps)
 services/sweep.py       weekly orphan sweep of statement images: unlinked rows, then files with no row (24 h grace)
@@ -105,6 +111,9 @@ Imports are absolute from the backend root (`from db.models.user import User`, `
 - **Student ids never reach other students on the leaderboard**: `routers/leaderboard.py` fills `login_id` only for staff and admins, and marks the caller's row with `is_me` instead of sending user ids (FR-STD-03).
 - **Hidden test data never reaches a student**: `routers/submissions.py` shapes every result per viewer (`_result_out`), and `services/submissions.py` refuses to store output for a hidden case. Check both when you add a field to a result or a new way to read one (NFR-SEC-07).
 - **Submission reports are written before the commit**: in `apply_event`, test results and the compile log go to MongoDB (`services/reports.py`) after the submission lock and the `judge_events` insert, and before `db.commit()`. Every write is an idempotent `$set` on a fixed key, so a failed commit is repaired by the judge's retry, and a Mongo error rolls the event back (503 from `main.py`, the judge retries). Never write a report after the commit or with `$inc`/`$push`. A rejudge needs no Mongo cleanup: the next attempt reads `"{submission_id}:{attempt}"`, a new document.
+- **Clarification rules live in `services/clarifications.py`**: a student must never read a private thread of someone else, or any thread on a problem that is not enabled (404, like a draft). Conditional writes put the condition in the update filter (`student_edit_filter`, `reply_filter`, ...) so a concurrent reply cannot slip between check and write; replies change one element at a time (`$push`, `$set replies.$`, `$pull`). Keep `permissions()` in step with those filters: the UI shows only what it allows.
+- **Routes that write only MongoDB log with `log_operation_now`** (after the MongoDB write succeeds): `log_operation` waits for a Postgres commit those routes never make, so its entry would be dropped.
+- **Notifications are best effort and private**: `notify()` never raises, so a reply or announcement never fails because of it; every notification query filters on the caller's `user_id`.
 - **Judge events are applied exactly once**: `apply_event` locks the submission, answers 409 for an older attempt or another job id, and dedups on `judge_events.event_id` with `ON CONFLICT DO NOTHING ... RETURNING` (the driver's `rowcount` is -1 here, so never test that).
 - **The stream route holds no database connection**: it is `async def`, authenticates in a thread with its own `SessionLocal()`, and must not take `Db` or `CurrentSession` as dependencies.
 

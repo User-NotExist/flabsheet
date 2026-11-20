@@ -174,6 +174,31 @@ docker compose -f compose.prod.yaml exec backend python cli.py migrate-to-mongo
 docker compose -f compose.prod.yaml exec backend python cli.py migrate-to-mongo --drop-old
 ```
 
+## CRUD coverage
+
+Which part of the web UI creates, reads, updates and deletes each table (PostgreSQL) and collection (MongoDB). "System" means the backend, the worker or the judge writes it as a side effect, and no page edits it directly. Where a delete is really a deactivation, an archive or an expiry, the table says so.
+
+| Entity | Engine | Create | Read | Update | Delete | Where in the UI |
+| --- | --- | --- | --- | --- | --- | --- |
+| `users` (students) | PostgreSQL | Add one, or import a CSV | List and search | Display name, reset password, reactivate | **Deactivate** (the row stays: submissions and scores refer to it) | `/manage/students` |
+| `users` (staff, admin) | PostgreSQL | Add staff (admins come from `cli.py seed-admin`) | List and search | Display name, reset password, reactivate | **Deactivate** (the last active admin cannot be) | `/admin/staff` |
+| `sessions` | PostgreSQL | Sign in | System (every request checks it; no list page) | System (`last_seen_at`) | Log out; a password change or reset revokes the others | `/login`, account menu, `/change-password` |
+| `student_imports` | PostgreSQL | CSV import | — (audit row; the result CSV is downloaded once) | — | — | `/manage/students` |
+| `problems` | PostgreSQL | New problem | Problem lists, problem page | Editor (title, statement), enable / disable | Delete while no student has submitted, else **archive** (read-only, hidden from students) | `/manage/problems`, `/manage/problems/[id]`, `/problems` |
+| `problem_versions` | PostgreSQL | Saving a judge-relevant change in the editor | Editor, build panel | — (**immutable**; only the build fills in its result) | With its problem | `/manage/problems/[id]` |
+| `problem_languages` | PostgreSQL | Editor settings (part of a new version) | Editor, problem page limits | — (immutable, part of the version) | With its version | `/manage/problems/[id]`, `/problems/[slug]` |
+| `test_cases` | PostgreSQL | Editor test cases (part of a new version) | Editor; students see samples | Hint in place; anything else makes a new version | Removing a case makes a new version without it; rows go with the problem | `/manage/problems/[id]`, `/problems/[slug]` |
+| `images` | PostgreSQL + RustFS | Upload in the statement editor | Rendered in statements | — (files are never overwritten) | **Orphan sweep** removes images no statement or hint links, 24 h after | `/manage/problems/[id]` |
+| `submissions` | PostgreSQL | Submit | History, result page, staff browser, CSV | Rejudge, requeue (staff); status and verdict by the judge | — (staff test submissions go with their problem) | `/problems/[slug]`, `/submissions/[id]`, `/manage/submissions` |
+| `problem_scores` | PostgreSQL | System (first judged result) | Problem list, progress matrix, leaderboard, scores CSV | System (each judged result, rejudges) | With its problem | `/problems`, `/manage/progress`, `/leaderboard` |
+| `judge_events` | PostgreSQL | System (judge) | — | — | — | none: idempotency log |
+| `judge_outbox` | PostgreSQL | System | — | System (sent, retries) | — | none: delivery queue |
+| `instance_settings` | PostgreSQL | System (one row, seeded) | Banner, settings page | Killswitch, leaderboard mode | — (single row) | `/admin/settings`, `/manage/leaderboard` |
+| `operation_logs` | MongoDB | System (every audited action) | Filtered, paged list | — (**append-only** audit log) | — | `/admin/logs` |
+| `submission_reports` | MongoDB | System (judge events) | Result report per test | System (each event; a rejudge writes a new attempt) | With its problem | `/submissions/[id]`, `/problems/[slug]` |
+| `clarifications` | MongoDB | Ask a question; staff post announcements (on a problem or course-wide); reply | Problem tab, staff queue, dashboard announcements | Edit own question and replies; staff set status, pin, visibility, edit any reply | Own question while unanswered, own replies; staff any thread or reply; with its problem | `/problems/[slug]` (Clarifications tab), `/manage/clarifications`, `/` |
+| `notifications` | MongoDB | System (a staff reply, an announcement); staff send one | Bell, full list | Mark read / unread, mark all read | Dismiss, clear read; **expire** after 90 days (TTL index) | top bar bell, `/notifications`, send dialog on `/manage/clarifications` |
+
 ## More documentation
 
 - `docs/srs.md`: requirements and resolved decisions

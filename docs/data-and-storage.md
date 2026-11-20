@@ -1,6 +1,6 @@
 # Database and object storage
 
-PostgreSQL is the system of record for every user, problem, submission and score; MongoDB holds two kinds of data that are written once per event and read as a whole, the operation log and the per-test submission reports; RustFS holds the files those rows point to, addressed by key and checked by SHA-256. Redis holds only rebuildable data and is not covered here.
+PostgreSQL is the system of record for every user, problem, submission and score; MongoDB holds data shaped as one self-contained document per thing and read as a whole: the operation log and the per-test submission reports (written once per event), and the clarification threads and notifications (edited in place, one document at a time); RustFS holds the files those rows point to, addressed by key and checked by SHA-256. Redis holds only rebuildable data and is not covered here.
 
 ## Entity relationships
 
@@ -17,6 +17,10 @@ MongoDB (no foreign keys; the ids refer to Postgres rows):
 operation_logs.user_id ··▶ users
 submission_reports.submission_id, problem_id, user_id ··▶ submissions, problems, users
 submission_reports.results.<test_case_id> ··▶ test_cases
+clarifications.problem_id ··▶ problems        (null = course-wide announcement)
+clarifications.author_id, replies[].author_id ··▶ users
+notifications.user_id ··▶ users
+notifications.data.problem_id ··▶ problems    (answers and problem announcements)
 ```
 
 A problem changes only through new versions, and each submission records the version it was judged against, so old results stay explainable after edits. Two shortcut keys are left out of the drawing for clarity: `submissions.problem_id` and `problem_scores.problem_id` both point at `problems`.
@@ -294,7 +298,7 @@ Skip the call entirely for SE and JE results, so they never replace a score (FR-
 
 ## MongoDB
 
-A standalone MongoDB 8.0 server (`infra/compose.yaml`, database `MONGO_DB`, default `flabsheet`) holds two collections. Every write touches one document, so no replica set or multi-document transaction is needed. `db/mongo.py` creates the indexes at startup (`ensure_indexes`, next to `create_all`).
+A standalone MongoDB 8.0 server (`infra/compose.yaml`, database `MONGO_DB`, default `flabsheet`) holds four collections. Every write is atomic on one document (an announcement's fan-out is one `insert_many` of independent documents), so no replica set or multi-document transaction is needed. `db/mongo.py` creates the indexes at startup (`ensure_indexes`, next to `create_all`).
 
 ### `operation_logs`
 
@@ -347,6 +351,76 @@ One document per submission attempt, written by `apply_event` through `services/
 
 **Write rule:** `apply_event` locks the submission and inserts the `judge_events` row, writes the document, and only then commits Postgres. Each write is an idempotent `$set` on a fixed key (`results.<test_case_id>`, `compile_log`), so a failed commit is repaired by the judge's retry, and a MongoDB error rolls the event back (503, the judge retries). A rejudge starts a new attempt and therefore a new document; readers always ask for `submissions.attempt`, and older attempts stay as history. Deleting a problem removes its reports after the commit, best effort.
 
+### `clarifications`
+
+One document per Q&A thread or announcement, with its replies embedded, written by `routers/clarifications.py` with the rules in `services/clarifications.py`.
+
+```js
+{
+  _id:        ObjectId,
+  problem_id: 7 | null,            // problems.id; null = course-wide announcement
+  author_id:  42,                  // users.id
+  kind:       "question" | "announcement",
+  title:      "…",                 // 1–200 chars
+  body_md:    "…",                 // 1–5000 chars, Markdown (rendered sanitised, images only from this site)
+  visibility: "public" | "private",// private = author + staff; announcements are always public
+  status:     "open" | "answered" | "closed",  // announcements start "closed": no answer is awaited
+  pinned:     false,
+  replies: [ { _id: ObjectId, author_id: 42, role: "student" | "staff" | "admin",  // role when replying
+               body_md: "…", created_at: ISODate, edited_at: ISODate | null } ],   // at most 100
+  tags:       ["output"],          // at most 5, 1–32 chars each, no repeats
+  created_at: ISODate,
+  updated_at: ISODate              // any change, including a reply: "last activity"
+}
+```
+
+| Index | Serves |
+| --- | --- |
+| `{problem_id: 1, pinned: -1, updated_at: -1}` | A problem's Clarifications tab, pinned first; with `problem_id: null`, the dashboard's course-wide announcements; deleting a problem's threads |
+| `{author_id: 1, created_at: -1}` | A student's own questions (`GET /clarifications` as a student) |
+| `{status: 1, updated_at: -1}` | The staff queue (`/manage/clarifications`), open questions first by default |
+
+**Write rules:**
+
+- Students read public threads and their own, and only on problems they can open now (enabled); anything else answers 404, like a draft on the solve page. They edit their own question while it is `open` with no staff reply, delete it while it has no replies, reply to it unless `closed`, and edit or delete their own replies. Staff and admins do all of that on any thread, and post announcements, set the status, pin and change the visibility.
+- Every conditional write carries its condition in the filter (`status: "open"`, `"replies.role": {$nin: ["staff", "admin"]}`, `replies: {$size: 0}`, `"replies.99": {$exists: false}`), so a concurrent reply cannot slip between the check and the write.
+- Each reply change touches one array element: `$push` adds, `$set` on `replies.$` (found with `$elemMatch` on the reply id) edits, `$pull` deletes. Each also sets `updated_at`.
+- A staff reply sets a question's `status` to `answered` and notifies its author; the author's follow-up on an answered question sets it back to `open`, so it returns to the queue.
+- Author names, roles and problem titles are read from Postgres in one batched query per response, never per row.
+- No route here writes to Postgres, so the operation log entry (`clarification.create`, `.announce`, `.update`, `.delete`, `.reply`, `.reply_update`, `.reply_delete`) is written with `log_operation_now` after the MongoDB write succeeds.
+- Deleting a problem removes its threads after the Postgres commit, best effort, like its reports.
+- Image links in threads are not seen by the orphan sweep (it reads `statement_md` and `hint_md` only), so an image linked only from a thread is removed 24 h after its last statement link goes.
+
+### `notifications`
+
+One document per user per event, written by `services/notifications.py`.
+
+```js
+{
+  _id:        ObjectId,
+  user_id:    42,                  // users.id of the recipient
+  type:       "clarification.answered" | "clarification.new" | "announcement" | "manual",
+  title:      "…",                 // ≤ 200 chars
+  body:       "…" | null,          // ≤ 1000 chars, plain text
+  link:       "/problems/two-sum#clarifications" | null,   // a path on this site, never another site
+  data:       { clarification_id: "…", problem_id: 7 },    // differs by type; {} for manual
+  is_read:    false,
+  created_at: ISODate              // the TTL index removes the document 90 days later
+}
+```
+
+| Index | Serves |
+| --- | --- |
+| `{user_id: 1, is_read: 1, created_at: -1}` | The bell's unread count, the `/notifications` list (queried with `is_read: {$in: [false, true]}` so the two ranges merge in date order), mark all read, clear read |
+| `{created_at: 1}` TTL, `expireAfterSeconds: 7776000` | Removes notifications after 90 days |
+
+**Write rules:**
+
+- A staff reply on a question notifies its author (`clarification.answered`); a new student question notifies nobody (staff work from the queue); an announcement notifies every active student (one `insert_many`; for a problem announcement only if the problem is enabled); staff can send a `manual` one to one active student or to all. `clarification.new` is reserved and not written yet.
+- Writing a notification is best effort, like the operation log: a MongoDB failure is logged as a warning and never fails the reply or announcement that caused it. Only a manual send, where the notification is the whole request, answers 503.
+- Every read and change filters on `user_id` = the caller, so another user's notification answers 404. Each change is logged with `log_operation_now` (`notification.update`, `.read_all`, `.delete`, `.clear_read`, `.send`).
+- Deleting a problem also removes notifications whose `data.problem_id` names it, after the commit, best effort.
+
 ## Object storage
 
 Two RustFS buckets hold every file; the browser never gets storage credentials or storage URLs, and the judge gets only a read-only key for `problems` plus short-lived presigned URLs.
@@ -396,7 +470,7 @@ Back up PostgreSQL, MongoDB and both buckets daily; restore the databases first 
 Restore order:
 
 1. Stop the API and the worker.
-2. Restore PostgreSQL to the chosen time, and MongoDB from the same night (`mongorestore --drop`). Log entries and reports newer than the dump are lost; a submission whose report is missing shows no per-test results until it is rejudged.
+2. Restore PostgreSQL to the chosen time, and MongoDB from the same night (`mongorestore --drop`). Log entries, reports, clarification threads and notifications newer than the dump are lost; a submission whose report is missing shows no per-test results until it is rejudged.
 3. Restore both buckets from the same night or later. Extra newer files are harmless; missing files are not.
 4. Start the API, check a problem page, a package build and an old submission's source, then re-enable the sweep job (`ORPHAN_SWEEP_ENABLED=true`, restart the worker).
 

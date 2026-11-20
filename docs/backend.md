@@ -13,7 +13,7 @@ The stack is sync: handlers are plain `def` functions that FastAPI runs in its t
 | Runtime | Python 3.12, FastAPI, Uvicorn, one worker process (see Database) |
 | Database | SQLAlchemy 2 (sync) + psycopg 3. `main.py` creates missing tables and indexes at import with `create_all`; Alembic migrations are deferred until after the MVP (NFR-OPS-04) |
 | Validation | Pydantic v2; separate response models per role (student vs staff) |
-| MongoDB | `pymongo` (sync) for the `operation_logs` and `submission_reports` collections (`db/mongo.py`); `main.py` creates their indexes at import (`ensure_indexes`) |
+| MongoDB | `pymongo` (sync) for the `operation_logs`, `submission_reports`, `clarifications` and `notifications` collections (`db/mongo.py`); `main.py` creates their indexes at import (`ensure_indexes`), including the 90-day TTL on notifications |
 | Redis | `redis-py` (sync) for streams, rate limits and caches; `redis.asyncio` only in the SSE route for pub/sub |
 | Object storage | S3 API, path-style, for upload and presigned GET/PUT, through sync `boto3` (`services/storage.py`) |
 | Passwords | `argon2-cffi` (argon2id) |
@@ -43,13 +43,17 @@ routers/<area>.py       one APIRouter per area, with its request/response models
   logs.py               GET /admin/logs (paged, filtered), GET /admin/logs/types
   internal.py           judge endpoints: judge-events, job refresh
   progress.py           GET /admin/progress (matrix), GET /admin/export/scores.csv
+  clarifications.py     /problems/{slug}/clarifications, /clarifications: Q&A threads, replies, announcements
+  notifications.py      /notifications (own), POST /admin/notifications (staff send)
   planned: staff.py, monitoring.py, leaderboard.py
 services/<area>.py      logic shared by routers and background jobs
   auth.py               current_session, require_role, CSRF check
   session.py            session create / lookup / revoke, Redis cache
-  rate_limit.py         failed-login counters
+  rate_limit.py         failed-login counters; submit, question and reply slots (SET NX)
   operation_log.py      log_operation, log_operation_now (MongoDB, after the commit)
   reports.py            submission reports in MongoDB: per-test results, compile log
+  clarifications.py     thread rules: read filter, permissions, atomic write filters, batched author lookup
+  notifications.py      notify() (one insert_many, best effort), active_student_ids()
   errors.py             ApiError (detail + code)
   storage.py            S3 client, presigned URLs, StorageError
   packages.py           problem.yaml, package zips, build steps
@@ -76,6 +80,8 @@ Each area owns its tables and its routes; endpoints are listed in SRS section 6.
 | `judge` | `judge_events`, `judge_outbox`, Redis streams | Enqueue, events endpoint, refresh endpoint (next section) | FR-JDG-01–05, 6.2–6.5 |
 | `scoring` | `problem_scores`, leaderboard cache, exports | Update the current score inside the `done` transaction (built, in `services/submissions.py`). Staff test submissions get no `problem_scores` row, so nothing that reads the table can rank them. Leaderboard: one SQL query over `problem_scores` for active students and enabled problems, cached 5 s; frozen mode serves a snapshot taken at freeze time. CSV exports stream rows, UTF-8 with BOM | FR-JDG-06, FR-STD-02/03, FR-MON-01, 04, 05, 07 |
 | `settings` | `instance_settings` | Single row, read from PostgreSQL by primary key on every `GET /settings` and every submit (no Redis cache yet: add one only if the read shows up under load). `PUT /admin/settings/submissions` (admin) changes the killswitch and writes `settings.killswitch` to the operation log; the leaderboard endpoint is planned | FR-ADM-05, FR-MON-07 |
+| `clarifications` | MongoDB `clarifications` | Threads on problems (questions, announcements) and course-wide announcements, replies embedded (≤ 100). Students read public threads and their own on enabled problems (else 404), edit their question while it is open with no staff reply, delete it while it has no replies, reply unless closed. Staff moderate (status, pin, visibility) and delete anything. Conditions live in the write filters, so check and write are one atomic update; replies change with `$push` / `$set replies.$` / `$pull`. Every response carries `permissions` for the UI. Question creation 1 / 30 s and replies 1 / 5 s per user. No Postgres write, so the operation log uses `log_operation_now` after the MongoDB write. Deleted with their problem, after the commit | — (added for the course project) |
+| `notifications` | MongoDB `notifications` | Per-user, TTL 90 days. Written by a staff reply (to the question's author) and an announcement (every active student; for a problem only if it is enabled), in one `insert_many`, best effort; staff send `manual` ones. Every query filters on the caller's `user_id`. Links are paths on this site only (pattern checked) | — (added for the course project) |
 | `operation_log` | MongoDB `operation_logs` | The audit log. `log_operation(db, "area.action", user_id=..., info={...})` inside the operation's transaction (written to MongoDB when it commits, best effort); `log_operation_now(...)` for events that must survive a failed request (failed logins, permission denials). Never passwords or tokens in `info` | NFR-SEC-09 |
 
 **Errors.** Raise `HTTPException(status, "Sentence for the user.")`. When the frontend has to react to the kind of error, raise `ApiError(status, "Sentence.", code="snake_case")` from `services/errors.py` instead; the body is then `{"detail": ..., "code": ...}`. Codes in use or reserved: `rate_limited` (in use), `submissions_closed`, `language_not_allowed`, `problem_disabled`, `csv_invalid`.

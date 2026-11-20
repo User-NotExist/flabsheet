@@ -27,8 +27,8 @@ proxy.ts                      session check and role routing (Next 16 "proxy", f
 app/login, app/change-password    signed-out / account pages
 app/(app)/                    signed-in pages, one layout with the top nav
   manage/problems, manage/problems/[id], manage/problems/new, manage/students
-  manage/progress
-  problems, problems/[slug], submissions/[id]
+  manage/progress, manage/clarifications
+  problems, problems/[slug], submissions/[id], notifications
   planned: leaderboard, manage/submissions, manage/leaderboard, admin/staff, admin/settings
 app/api/<path>/route.ts       thin forwarders to the backend (forwardToBackend)
 components/ui/                shadcn primitives
@@ -38,13 +38,14 @@ lib/backend.ts                server-only forwarder
 lib/navigation.ts             NAV_ITEMS: nav links and which role may open which section
 lib/sse.ts                    useSubmissionProgress: submission status stream hook
 lib/drafts.ts                 code drafts in localStorage, per user, problem and language
+lib/notification-events.ts    window event that refreshes the bell after a change on /notifications
 ```
 
 There are no per-role route groups. Which role may open a page is decided by its `NAV_ITEMS` entry, which `proxy.ts` enforces for navigation (the backend enforces it for data).
 
 ## Pages
 
-Fifteen routes cover the MVP; staff pages are also available to admin.
+Seventeen routes cover the MVP and the clarification features; staff pages are also available to admin.
 
 | Route | Role | What it does | Covers |
 | --- | --- | --- | --- |
@@ -62,6 +63,8 @@ Fifteen routes cover the MVP; staff pages are also available to admin.
 | `/manage/leaderboard` | Staff | Live leaderboard + Live / Hidden / Frozen control | FR-MON-07 |
 | `/admin/staff` | Admin | Create, edit, deactivate staff; reset password | FR-ADM-01–04 |
 | `/admin/settings` | Admin | Submission killswitch with banner message | FR-ADM-05 |
+| `/manage/clarifications` | Staff | Queue of every thread (open questions first), filters for status, kind and problem; thread dialog with reply, status, pin, visibility and delete; post an announcement; send a notification | — |
+| `/notifications` | All | Own notifications, newest first, paged by the server: mark read/unread, dismiss, mark all read, clear read; staff also send one | — |
 | `/admin/logs` | Admin | The operation log as a table, newest first, paged by the server; filters for type, user and date range | NFR-SEC-09 |
 
 ## Shared components
@@ -70,7 +73,10 @@ Build these once and reuse them; the student view and the staff preview must ren
 
 | Component | Used on | Behaviour |
 | --- | --- | --- |
-| `MarkdownView` | Problem page, editor preview, hints | GFM, KaTeX math, highlighted code, images from the API; sanitized, no raw HTML |
+| `MarkdownView` | Problem page, editor preview, hints, clarification threads | GFM, KaTeX math, highlighted code, images from the API; sanitized, no raw HTML. `userContent` (threads) also drops images hosted on other sites |
+| `ThreadView`, `ClarificationPanel` | Problem page (Clarifications tab, opened by `#clarifications`), staff queue | One thread with its replies and only the controls the backend's `permissions` allow; the panel lists a problem's threads pinned first with an ask form |
+| `NotificationBell` | Top bar | Unread count every 30 s, on focus and after changes on `/notifications`; dropdown with the latest 10 and "Mark all read" |
+| `Announcements` | Dashboards (`/#announcements`) | Course-wide announcements, pinned first |
 | `MarkdownEditor` | Problem editor | Split edit/preview; images via an "Insert image" button (file picker), paste or drag-drop (highlighted drop target). Each upload puts an `[Uploading name… #n]` placeholder at the cursor that becomes `![name](url)`; 5 MB and type check before upload; Save waits for uploads |
 | `TestCaseEditor` | Problem editor | Ordered list with drag reorder; input by typing or `.in` upload; visibility select (hidden / visible / sample); optional hint; expected output and reference time shown after build (staff only) |
 | `BuildStatusPanel` | Problem editor, problem list | Pending / ok / failed; on failure the failing test case, reason and log; warning when reference time is over 50% of the limit |
