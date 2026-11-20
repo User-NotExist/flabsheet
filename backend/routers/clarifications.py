@@ -553,9 +553,9 @@ def create_reply(clarification_id: str, body: ReplyIn, session: CurrentSession, 
     oid = rules.parse_id(clarification_id)
     current = rules.find_visible(db, session, oid)
     staff = rules.is_staff(session)
+    if len(current.get("replies") or []) >= rules.MAX_REPLIES:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This thread has reached its reply limit.")
     if not rules.permissions(current, session)["reply"]:
-        if len(current.get("replies") or []) >= rules.MAX_REPLIES:
-            raise HTTPException(status.HTTP_409_CONFLICT, "This thread has reached its reply limit.")
         if current["author_id"] == session.user_id and current["kind"] == "question":
             raise HTTPException(status.HTTP_409_CONFLICT, "This question is closed.")
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You can only reply to your own questions")
