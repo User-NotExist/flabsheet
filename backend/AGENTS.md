@@ -53,6 +53,7 @@ services/errors.py      ApiError: an HTTPException whose body also carries a mac
 services/operation_log.py  log_operation / log_operation_now: MongoDB operation_logs, written by an after_commit hook
 services/reports.py     MongoDB submission_reports: one document per attempt with per-test results and the compile log
 services/storage.py     boto3 S3 client: put/get/size/stream/list/delete, presigned URLs; raises StorageError (503 via main.py)
+services/images.py      strip_metadata: re-encode an uploaded image with Pillow without EXIF/XMP/comments (orientation applied, pixel caps)
 services/sweep.py       weekly orphan sweep of statement images: unlinked rows, then files with no row (24 h grace)
 services/packages.py    problem.yaml, staging/final package zips, the three build steps (start, record result, assemble)
 services/judge.py       job ids (ULID), Redis stream push, judge_outbox relay, batched send for a rejudge
