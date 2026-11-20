@@ -9,7 +9,7 @@ import db.models.student_import
 import db.models.problem
 import db.models.submission
 import db.models.instance_settings
-from routers import auth, images, internal, leaderboard, logs, problems, progress, settings as settings_router, solve, staff, students, submissions, admin_submissions
+from routers import auth, clarifications, images, internal, leaderboard, logs, problems, progress, settings as settings_router, solve, staff, students, submissions, admin_submissions
 from pymongo.errors import PyMongoError
 
 from db.mongo import ensure_indexes, mongo_error_handler
@@ -53,6 +53,8 @@ app.include_router(progress.export_router)
 app.include_router(settings_router.router)
 app.include_router(settings_router.admin_router)
 app.include_router(leaderboard.router)
+app.include_router(clarifications.router)
+app.include_router(clarifications.problem_router)
 app.include_router(logs.router)
 app.include_router(internal.router)
 
