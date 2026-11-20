@@ -183,9 +183,11 @@ export function MarkdownEditor({
               onDrop={handleDrop}
               disabled={disabled}
               spellCheck
-              // field-sizing lets the box grow with the text; cap it so the preview stays in view
+              // The user sizes the box with the corner handle. No flex-1: a flex
+              // basis of 0 overrides the height the handle sets, so dragging did
+              // nothing. Fixed field sizing so the box doesn't jump as text changes
               className={cn(
-                "max-h-[70vh] min-h-96 flex-1 font-mono text-sm",
+                "h-96 min-h-48 resize-y font-mono text-sm field-sizing-fixed",
                 dragActive && "ring-2 ring-primary",
               )}
             />
