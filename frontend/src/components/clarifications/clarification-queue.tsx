@@ -37,6 +37,10 @@ import { useApiError } from "@/lib/use-api-error";
 
 const ALL = "*";
 
+// Students ask and reply without notifying staff, so this list is the only
+// place new questions show up; same pace as the notification bell
+const REFRESH_MS = 30_000;
+
 type Query = {
   status: ClarificationStatus | "";
   kind: ClarificationKind | "";
@@ -152,12 +156,16 @@ function queueColumns(open: (id: string) => void) {
  * Staff page /manage/clarifications: every thread on every problem, most
  * recently active first, filtered in the request (open questions by default).
  * A row opens the thread in a dialog with the reply and moderation controls.
+ * The list re-reads itself every 30 s while the tab is visible and no thread
+ * is open, and when the tab is shown again.
  */
 export function ClarificationQueue({ actions }: { actions?: ReactNode }) {
   const toMessage = useApiError();
   const id = useId();
   const [query, setQuery] = useState<Query>(FIRST_QUERY);
   const [revision, setRevision] = useState(0);
+  // Background re-reads: not part of `requestKey`, so the table is not dimmed
+  const [tick, setTick] = useState(0);
   const [loaded, setLoaded] = useState<{ key: string; page: ClarificationPage } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [problems, setProblems] = useState<ProblemListItem[]>([]);
@@ -188,6 +196,21 @@ export function ClarificationQueue({ actions }: { actions?: ReactNode }) {
   }, [toMessage]);
 
   useEffect(() => {
+    // The open thread re-reads itself, and closing it refreshes the list
+    if (openId !== null) return;
+    const poll = () => {
+      // A background tab would only add load; it catches up when shown again
+      if (!document.hidden) setTick((value) => value + 1);
+    };
+    const timer = setInterval(poll, REFRESH_MS);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", poll);
+    };
+  }, [openId]);
+
+  useEffect(() => {
     let cancelled = false;
     listClarifications({
       page: query.pageIndex + 1,
@@ -213,7 +236,7 @@ export function ClarificationQueue({ actions }: { actions?: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [query, requestKey, toMessage]);
+  }, [query, requestKey, tick, toMessage]);
 
   const columns = useMemo(() => queueColumns(setOpenId), []);
 
@@ -343,6 +366,7 @@ export function ClarificationQueue({ actions }: { actions?: ReactNode }) {
             <ThreadView
               id={openId}
               showProblem
+              live
               onDelete={() => {
                 setOpenId(null);
                 refresh();
