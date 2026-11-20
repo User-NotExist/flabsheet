@@ -103,7 +103,8 @@ export function ClarificationPanel({
         title: values.title,
         body_md: values.body_md,
         tags: values.tags,
-        visibility: values.visibility,
+        // Only staff publish a question: they read it before every student can
+        visibility: staff ? values.visibility : undefined,
       });
       notifySuccess(
         created.kind === "announcement"
@@ -137,7 +138,7 @@ export function ClarificationPanel({
         <p className="text-muted-foreground">
           {staff
             ? "Questions from students and your announcements on this problem."
-            : "Ask about the statement here. Your questions are private unless you make them public."}
+            : "Ask about the statement here. Only you and staff see your questions; staff may make one public for everyone."}
         </p>
         {!asking && (
           <Button size="sm" onClick={() => setAsking(true)}>
@@ -150,7 +151,7 @@ export function ClarificationPanel({
         <div className="rounded-lg border p-4">
           <ThreadForm
             allowKind={staff}
-            allowVisibility
+            allowVisibility={staff}
             initial={staff ? { kind: "announcement", visibility: "public" } : undefined}
             submitLabel="Post"
             pendingLabel="Posting…"

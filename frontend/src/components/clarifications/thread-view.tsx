@@ -234,7 +234,9 @@ export function ThreadView({
         )}
         {!permissions.edit && thread.author.is_me && question && (
           <p className="text-xs text-muted-foreground">
-            You can edit your question until staff reply, and delete it until anyone replies.
+            {thread.visibility === "public"
+              ? "Staff made this question public, so it can no longer change. Ask a new question to follow up."
+              : "You can edit your question until staff reply, and delete it until anyone replies."}
           </p>
         )}
       </header>
@@ -284,7 +286,10 @@ export function ThreadView({
               disabled={busy}
               onClick={() =>
                 thread.visibility === "private"
-                  ? moderate({ visibility: "public" }, "Every student can see it now.")
+                  ? moderate(
+                      { visibility: "public" },
+                      "Every student can see it now. The author can no longer change it.",
+                    )
                   : moderate({ visibility: "private" }, "Only the author and staff can see it now.")
               }
             >
@@ -372,6 +377,7 @@ export function ThreadView({
         ) : (
           thread.author.is_me &&
           question &&
+          thread.visibility === "private" &&
           thread.status === "closed" && (
             <p className="text-muted-foreground">Staff closed this question.</p>
           )
