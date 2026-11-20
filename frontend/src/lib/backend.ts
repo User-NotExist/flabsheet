@@ -24,6 +24,8 @@ const FORWARDED_REQUEST_HEADERS = [
   "accept",
   "content-type",
   "cookie",
+  // Polled endpoints answer 304 when the client already has the body
+  "if-none-match",
   "user-agent",
   "x-csrf-token",
   // Lets the backend see the real client IP (login rate limiting, audit log)
@@ -126,7 +128,9 @@ export async function forwardToBackend(
   const responseHeaders = new Headers(upstream.headers); // keeps each Set-Cookie
   for (const name of DROPPED_RESPONSE_HEADERS) responseHeaders.delete(name);
 
-  return new Response(upstream.body, {
+  // The Response constructor throws if a 204/205/304 is given any body
+  const noBody = upstream.status === 204 || upstream.status === 205 || upstream.status === 304;
+  return new Response(noBody ? null : upstream.body, {
     status: upstream.status,
     headers: responseHeaders,
   });

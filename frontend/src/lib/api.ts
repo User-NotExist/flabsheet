@@ -69,7 +69,8 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
   } catch {
     throw new ApiError(0, "Cannot reach the server. Please try again.");
   }
-  if (!res.ok) {
+  // A 304 only answers a caller that sent If-None-Match itself, which handles it
+  if (!res.ok && res.status !== 304) {
     const retryAfter = Number(res.headers.get("Retry-After")) || undefined;
     const { message, code } = await errorBody(res);
     throw new ApiError(res.status, message, retryAfter, code);
@@ -553,9 +554,30 @@ export type Leaderboard = {
   rows: LeaderboardRow[];
 };
 
-/** Throws ApiError(403, code "leaderboard_hidden") to students while it is hidden. */
+// The last leaderboard body and its ETag. Pages poll it, so a request carries
+// If-None-Match and an unchanged board comes back as an empty 304. The ETag is
+// a hash of the exact body, so the kept copy is right for whoever gets a 304.
+// Memory only, and logout does a full page load, so nothing outlives it.
+let lastLeaderboard: { etag: string; board: Leaderboard } | null = null;
+
+/**
+ * Throws ApiError(403, code "leaderboard_hidden") to students while it is hidden.
+ * An unchanged board resolves to the same object as last time, so
+ * `setState(board)` skips the re-render.
+ */
 export async function getLeaderboard(): Promise<Leaderboard> {
-  return (await request("/leaderboard")).json();
+  const kept = lastLeaderboard;
+  // Set by hand, the header makes the browser hand the 304 to us instead of
+  // answering from its own cache (the response is no-store anyway)
+  const res = await request("/leaderboard", {
+    cache: "no-store",
+    headers: kept ? { "If-None-Match": kept.etag } : undefined,
+  });
+  if (res.status === 304 && kept) return kept.board;
+  const board: Leaderboard = await res.json();
+  const etag = res.headers.get("ETag");
+  lastLeaderboard = etag ? { etag, board } : null;
+  return board;
 }
 
 /** Staff: choose what students see. Freezing takes a snapshot of the standings now. */

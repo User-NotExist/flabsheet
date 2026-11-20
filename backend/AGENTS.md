@@ -50,6 +50,7 @@ services/auth.py        current_session / CurrentSession / require_role(...) dep
 services/session.py     session create/lookup/revoke; Postgres is the source of truth, Redis is a read cache
 services/rate_limit.py  Redis rate limits: failed-login counters (per login id, per client IP) and the 10 s submit slot per user
 services/cache_control.py  DefaultNoStoreMiddleware: `Cache-Control: private, no-store` unless the route sets its own
+services/etag.py        etag_json(request, model): JSON with an ETag over the exact body, empty 304 on a matching If-None-Match (GET /leaderboard)
 services/errors.py      ApiError: an HTTPException whose body also carries a machine-readable `code`
 services/operation_log.py  log_operation / log_operation_now: MongoDB operation_logs, written by an after_commit hook
 services/reports.py     MongoDB submission_reports: one document per attempt with per-test results and the compile log
