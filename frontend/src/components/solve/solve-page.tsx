@@ -2,9 +2,17 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { FormError } from "@/components/auth/form-error";
+import { ClarificationPanel } from "@/components/clarifications/clarification-panel";
 import { CodeEditor } from "@/components/problems/code-editor";
 import { MarkdownView } from "@/components/problems/markdown-view";
 import { StatusBadge } from "@/components/problems/problem-badges";
@@ -38,6 +46,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ApiError,
   MAX_SOURCE_BYTES,
@@ -93,6 +102,23 @@ function Chip({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Notification links point at /problems/{slug}#clarifications
+const CLARIFICATIONS_HASH = "#clarifications";
+
+function subscribeToHash(onChange: () => void) {
+  window.addEventListener("hashchange", onChange);
+  return () => window.removeEventListener("hashchange", onChange);
+}
+
+/** The URL's #fragment; "" on the server, so the first render matches it. */
+function useLocationHash(): string {
+  return useSyncExternalStore(
+    subscribeToHash,
+    () => window.location.hash,
+    () => "",
+  );
+}
+
 function listItem(submission: Submission): SubmissionListItem {
   return {
     id: submission.id,
@@ -138,6 +164,11 @@ export function SolvePage() {
   // null = follow the problem's checking mode
   const [whitespace, setWhitespace] = useState<boolean | null>(null);
   const coolTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // The tab the user picked; until then the URL decides
+  const [chosenTab, setChosenTab] = useState<string | null>(null);
+  const [threadCount, setThreadCount] = useState<number | null>(null);
+  const hash = useLocationHash();
+  const tab = chosenTab ?? (hash === CLARIFICATIONS_HASH ? "clarifications" : "statement");
 
   // The router keeps this page mounted (hidden) after navigating away
   useLayoutEffect(() => {
@@ -356,43 +387,62 @@ export function SolvePage() {
             )}
           </div>
 
-          <MarkdownView source={problem.statement_md} />
+          <Tabs
+            id="clarifications"
+            value={tab}
+            onValueChange={(value) => setChosenTab(String(value))}
+            className="scroll-mt-6"
+          >
+            <TabsList>
+              <TabsTrigger value="statement">Statement</TabsTrigger>
+              <TabsTrigger value="clarifications">
+                Clarifications{threadCount ? ` (${threadCount})` : ""}
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="statement" className="flex flex-col gap-4">
+            <MarkdownView source={problem.statement_md} />
 
-          {problem.samples.length > 0 && (
-            <section className="flex flex-col gap-4 border-t pt-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-base font-semibold">
-                  {problem.samples.length === 1 ? "Sample" : "Samples"}
-                </h2>
-                <WhitespaceToggle checked={showWhitespace} onChange={setWhitespace} />
-              </div>
-              {problem.samples.map((sample, index) => (
-                <div key={sample.ordinal} className="flex flex-col gap-2">
-                  {problem.samples.length > 1 && (
-                    <h3 className="text-sm font-medium">Sample {index + 1}</h3>
-                  )}
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="flex min-w-0 flex-col gap-1.5">
-                      <span className="text-xs text-muted-foreground">Input</span>
-                      <WhitespaceText
-                        text={sample.input}
-                        showWhitespace={showWhitespace}
-                        truncated={sample.input_truncated}
-                      />
-                    </div>
-                    <div className="flex min-w-0 flex-col gap-1.5">
-                      <span className="text-xs text-muted-foreground">Expected output</span>
-                      <WhitespaceText
-                        text={sample.expected}
-                        showWhitespace={showWhitespace}
-                        truncated={sample.expected_truncated}
-                      />
+            {problem.samples.length > 0 && (
+              <section className="flex flex-col gap-4 border-t pt-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="text-base font-semibold">
+                    {problem.samples.length === 1 ? "Sample" : "Samples"}
+                  </h2>
+                  <WhitespaceToggle checked={showWhitespace} onChange={setWhitespace} />
+                </div>
+                {problem.samples.map((sample, index) => (
+                  <div key={sample.ordinal} className="flex flex-col gap-2">
+                    {problem.samples.length > 1 && (
+                      <h3 className="text-sm font-medium">Sample {index + 1}</h3>
+                    )}
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="flex min-w-0 flex-col gap-1.5">
+                        <span className="text-xs text-muted-foreground">Input</span>
+                        <WhitespaceText
+                          text={sample.input}
+                          showWhitespace={showWhitespace}
+                          truncated={sample.input_truncated}
+                        />
+                      </div>
+                      <div className="flex min-w-0 flex-col gap-1.5">
+                        <span className="text-xs text-muted-foreground">Expected output</span>
+                        <WhitespaceText
+                          text={sample.expected}
+                          showWhitespace={showWhitespace}
+                          truncated={sample.expected_truncated}
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </section>
-          )}
+                ))}
+              </section>
+            )}
+            </TabsContent>
+            {/* Mounted from the start so the tab label can show the count */}
+            <TabsContent value="clarifications" keepMounted>
+              <ClarificationPanel slug={problem.slug} staff={preview} onCount={setThreadCount} />
+            </TabsContent>
+          </Tabs>
         </article>
 
         <div className="flex min-w-0 flex-col gap-5">
