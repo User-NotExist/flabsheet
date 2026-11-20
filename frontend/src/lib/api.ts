@@ -863,3 +863,253 @@ export const SCORES_CSV_URL = `${API_URL}/admin/export/scores.csv`;
 
 /** Download link for every student submission, unfiltered (staff tests left out, FR-PRB-14). */
 export const STUDENT_SUBMISSIONS_CSV_URL = `${API_URL}/admin/export/submissions.csv`;
+
+// --- Clarifications: Q&A threads and announcements (MongoDB) ------------------
+// Types mirror the Pydantic models in backend/routers/clarifications.py. The
+// limits are the backend's (services/clarifications.py); the backend enforces
+// them and every permission, these only shape the forms.
+
+export const MAX_CLARIFICATION_TITLE = 200;
+export const MAX_CLARIFICATION_BODY = 5000;
+export const MAX_CLARIFICATION_REPLIES = 100;
+export const MAX_CLARIFICATION_TAGS = 5;
+export const MAX_CLARIFICATION_TAG_LENGTH = 32;
+
+export type ClarificationKind = "question" | "announcement";
+export type ClarificationVisibility = "public" | "private";
+export type ClarificationStatus = "open" | "answered" | "closed";
+
+export type ClarificationAuthor = {
+  display_name: string;
+  /** Current role; null for a user that no longer exists. */
+  role: UserRole | null;
+  is_me: boolean;
+  /** Staff and admin viewers only. */
+  login_id: string | null;
+};
+
+export type ClarificationReply = {
+  /** MongoDB ObjectId. */
+  id: string;
+  author: ClarificationAuthor;
+  /** The author's role when they replied. */
+  role: UserRole;
+  body_md: string;
+  created_at: string;
+  edited_at: string | null;
+  can_edit: boolean;
+  can_delete: boolean;
+};
+
+export type ClarificationListItem = {
+  /** MongoDB ObjectId. */
+  id: string;
+  /** Null for a course-wide announcement (or a problem deleted since). */
+  problem: { id: number; slug: string; title: string } | null;
+  author: ClarificationAuthor;
+  kind: ClarificationKind;
+  title: string;
+  body_md: string;
+  visibility: ClarificationVisibility;
+  status: ClarificationStatus;
+  pinned: boolean;
+  tags: string[];
+  reply_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/** What the caller may do with a thread, decided by the backend. */
+export type ClarificationPermissions = {
+  edit: boolean;
+  delete: boolean;
+  reply: boolean;
+  /** Status, pin and visibility (staff, admin). */
+  moderate: boolean;
+};
+
+export type Clarification = ClarificationListItem & {
+  replies: ClarificationReply[];
+  permissions: ClarificationPermissions;
+};
+
+export type ClarificationPage = { items: ClarificationListItem[]; total: number };
+
+export type NewClarification = {
+  kind?: ClarificationKind;
+  title: string;
+  body_md: string;
+  visibility?: ClarificationVisibility;
+  tags?: string[];
+};
+
+export type ClarificationUpdate = Partial<{
+  title: string;
+  body_md: string;
+  tags: string[];
+  status: ClarificationStatus;
+  pinned: boolean;
+  visibility: ClarificationVisibility;
+}>;
+
+export type ClarificationQuery = {
+  /** 1-based. */
+  page: number;
+  pageSize: number;
+  status?: ClarificationStatus;
+  /** Problem slug. */
+  problem?: string;
+  kind?: ClarificationKind;
+};
+
+/** Threads on a problem the caller may read, pinned first. */
+export async function listProblemClarifications(slug: string): Promise<ClarificationListItem[]> {
+  return (await request(`/problems/${encodeURIComponent(slug)}/clarifications`)).json();
+}
+
+/** Ask a question on a problem, or (staff) post an announcement on it. */
+export async function createProblemClarification(
+  slug: string,
+  body: NewClarification,
+): Promise<Clarification> {
+  return (await post(`/problems/${encodeURIComponent(slug)}/clarifications`, body)).json();
+}
+
+/** Staff: the whole queue, most recently active first. Students: their own questions. */
+export async function listClarifications(query: ClarificationQuery): Promise<ClarificationPage> {
+  const params = new URLSearchParams({
+    page: String(query.page),
+    page_size: String(query.pageSize),
+  });
+  if (query.status) params.set("status", query.status);
+  if (query.problem) params.set("problem", query.problem);
+  if (query.kind) params.set("kind", query.kind);
+  return (await request(`/clarifications?${params}`)).json();
+}
+
+/** Course-wide announcements, pinned first. */
+export async function listAnnouncements(): Promise<ClarificationListItem[]> {
+  return (await request("/clarifications/announcements")).json();
+}
+
+/** Staff: a course-wide announcement, sent to every active student. */
+export async function createAnnouncement(
+  body: Pick<NewClarification, "title" | "body_md" | "tags">,
+): Promise<Clarification> {
+  return (await post("/clarifications", body)).json();
+}
+
+export async function getClarification(id: string): Promise<Clarification> {
+  return (await request(`/clarifications/${id}`)).json();
+}
+
+export async function updateClarification(
+  id: string,
+  changes: ClarificationUpdate,
+): Promise<Clarification> {
+  return (await send("PATCH", `/clarifications/${id}`, changes)).json();
+}
+
+export async function deleteClarification(id: string): Promise<void> {
+  await send("DELETE", `/clarifications/${id}`);
+}
+
+export async function createReply(id: string, bodyMd: string): Promise<Clarification> {
+  return (await post(`/clarifications/${id}/replies`, { body_md: bodyMd })).json();
+}
+
+export async function updateReply(
+  id: string,
+  replyId: string,
+  bodyMd: string,
+): Promise<Clarification> {
+  return (
+    await send("PATCH", `/clarifications/${id}/replies/${replyId}`, { body_md: bodyMd })
+  ).json();
+}
+
+export async function deleteReply(id: string, replyId: string): Promise<Clarification> {
+  return (await send("DELETE", `/clarifications/${id}/replies/${replyId}`)).json();
+}
+
+// --- Notifications (MongoDB) ------------------------------------------------------
+// Types mirror backend/routers/notifications.py. Every call reads or changes
+// only the caller's own notifications.
+
+export const MAX_NOTIFICATION_TITLE = 200;
+export const MAX_NOTIFICATION_BODY = 1000;
+export const MAX_NOTIFICATION_LINK = 300;
+
+export type NotificationType =
+  | "clarification.answered"
+  | "clarification.new"
+  | "announcement"
+  | "manual";
+
+export type AppNotification = {
+  /** MongoDB ObjectId. */
+  id: string;
+  type: NotificationType;
+  title: string;
+  body: string | null;
+  /** A path on this site, or null. */
+  link: string | null;
+  data: Record<string, unknown>;
+  is_read: boolean;
+  created_at: string;
+};
+
+export type NotificationPage = {
+  items: AppNotification[];
+  total: number;
+  unread_count: number;
+};
+
+/** Own notifications, newest first. */
+export async function listNotifications(page: number, pageSize: number): Promise<NotificationPage> {
+  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+  return (await request(`/notifications?${params}`)).json();
+}
+
+export async function getUnreadCount(): Promise<number> {
+  const data: { unread_count: number } = await (
+    await request("/notifications/unread-count")
+  ).json();
+  return data.unread_count;
+}
+
+export async function setNotificationRead(id: string, isRead: boolean): Promise<AppNotification> {
+  return (await send("PATCH", `/notifications/${id}`, { is_read: isRead })).json();
+}
+
+/** Returns how many were marked. */
+export async function markAllNotificationsRead(): Promise<number> {
+  const data: { count: number } = await (await post("/notifications/read-all")).json();
+  return data.count;
+}
+
+export async function deleteNotification(id: string): Promise<void> {
+  await send("DELETE", `/notifications/${id}`);
+}
+
+/** Removes every read notification; returns how many. */
+export async function clearReadNotifications(): Promise<number> {
+  const data: { count: number } = await (await send("DELETE", "/notifications?read=true")).json();
+  return data.count;
+}
+
+export type ManualNotification = {
+  /** One student, or every active student with `all: true`. */
+  user_id?: number;
+  all?: boolean;
+  title: string;
+  body?: string;
+  /** A path on this site such as "/problems/two-sum". */
+  link?: string;
+};
+
+/** Staff: send a notification; returns how many students got it. */
+export async function sendNotification(body: ManualNotification): Promise<number> {
+  const data: { sent: number } = await (await post("/admin/notifications", body)).json();
+  return data.sent;
+}
