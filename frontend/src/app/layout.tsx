@@ -32,6 +32,9 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase: await requestOrigin(),
     title: { default: SITE_NAME, template: `%s · ${SITE_NAME}` },
     description: SITE_DESCRIPTION,
+    // A file in public/, not the app/icon.* convention, so the logo has one
+    // copy that pages can also use as /flabsheet.jpg
+    icons: { icon: "/flabsheet.jpg" },
     openGraph: { type: "website", siteName: SITE_NAME },
     twitter: { card: "summary_large_image" },
   };
