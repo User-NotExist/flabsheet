@@ -10,7 +10,7 @@ Guidance for AI coding agents working in this repo. Each part has its own file, 
 
 The design lives in [docs/](docs/): `srs.md` (requirements and resolved decisions), `data-and-storage.md` (schema, buckets), `backend.md` and `frontend.md` (implementation plans). Most of it is not built yet. When code and docs disagree, say so and ask instead of picking one.
 
-The page design lives in [docs/img/](docs/img/): file name shows the page title and slug. Use it as a guide/reference to build the frontend.
+The page design lives in [docs/design-image/](docs/design-image/): file name shows the page title and slug. Use it as a guide/reference to build the frontend.
 
 ## What this is
 
