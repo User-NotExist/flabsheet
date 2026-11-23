@@ -2,6 +2,8 @@
 
 A programming-course platform for students, staff and admins: problems, submissions, progress and a leaderboard.
 
+Presentation Video: https://youtu.be/HAY-yqmbNzo
+
 ```
 browser ──► frontend (Next.js :3000) ──/api/*──► backend (FastAPI :8000) ──► PostgreSQL, MongoDB
                                                    worker (arq)          ──► Redis, RustFS (S3)
@@ -198,6 +200,150 @@ Which part of the web UI creates, reads, updates and deletes each table (Postgre
 | `submission_reports` | MongoDB | System (judge events) | Result report per test | System (each event; a rejudge writes a new attempt) | With its problem | `/submissions/[id]`, `/problems/[slug]` |
 | `clarifications` | MongoDB | Ask a question; staff post announcements (on a problem or course-wide); reply | Problem tab, staff queue, dashboard announcements | Edit own question and replies; staff set status, pin, visibility, edit any reply | Own question while unanswered, own replies; staff any thread or reply; with its problem | `/problems/[slug]` (Clarifications tab), `/manage/clarifications`, `/` |
 | `notifications` | MongoDB | System (a staff reply, an announcement); staff send one | Bell, full list | Mark read / unread, mark all read | Dismiss, clear read; **expire** after 90 days (TTL index) | top bar bell, `/notifications`, send dialog on `/manage/clarifications` |
+
+## API routes
+
+The browser calls `/api/<path>` on the frontend, and a route handler under `frontend/src/app/api/` forwards it to the backend's `<path>` (`frontend/src/lib/backend.ts`). For example, `POST /api/auth/login` becomes `POST /auth/login`. The full request and response schemas are at http://localhost:8000/docs in development.
+
+- **Sessions**: the backend sets an HttpOnly session cookie at login. Every `POST`, `PUT`, `PATCH` and `DELETE` must also send the session's CSRF token in `X-CSRF-Token`. The token comes from `POST /auth/login` and `GET /auth/me`. A missing or wrong token gets `403`.
+- **Errors** are `{"detail": "...", "code": "..."}`, where `code` is optional. The codes are listed in `docs/srs.md` section 6.1.
+
+The **Access** column uses these levels:
+
+| Access | Who may call it |
+| --- | --- |
+| Public | Anyone, without a session |
+| Account | Any signed-in user, including one who still has to change an issued password |
+| Signed in | Any role, once the password has been changed (otherwise `403 Change your password to continue`) |
+| Staff | Staff and admins |
+| Admin | Admins only |
+| Judge | Judge workers, with `Authorization: Bearer <JUDGE_API_TOKEN>`. Not forwarded by the frontend. |
+
+Routes marked "Signed in" that serve both roles return different data to staff and students, as noted in the table.
+
+### Auth (`routers/auth.py`)
+
+| Method | Path | Access | Purpose |
+| --- | --- | --- | --- |
+| POST | `/auth/login` | Public | Sign in with login ID and password. Sets the session cookie and returns the user and CSRF token. Rate-limited per login ID and IP. |
+| GET | `/auth/me` | Account | The current user and CSRF token |
+| POST | `/auth/logout` | Account | End this session |
+| POST | `/auth/logout-all` | Account | End every session of this user. Backend only: the frontend has no route for it. |
+| POST | `/auth/change-password` | Account | Set a new password and sign out the other sessions. The current password isn't needed while the account is flagged to change it. |
+
+### Accounts (`routers/students.py`, `routers/staff.py`)
+
+| Method | Path | Access | Purpose |
+| --- | --- | --- | --- |
+| GET | `/students` | Staff | List students |
+| POST | `/students` | Staff | Create one student. Returns the generated password once. |
+| PATCH | `/students/{user_id}` | Staff | Change display name, deactivate or reactivate. Deactivating revokes the student's sessions. |
+| POST | `/students/{user_id}/reset-password` | Staff | Issue a new password, which the student must change at next sign-in |
+| POST | `/students/import` | Staff | Import a CSV (`display_name,student_id`). All or nothing. Returns a CSV of the generated passwords. |
+| GET | `/staff` | Admin | List staff and admins |
+| POST | `/staff` | Admin | Create a staff account |
+| PATCH | `/staff/{user_id}` | Admin | Change display name, deactivate or reactivate. The last active admin can't be deactivated. |
+| POST | `/staff/{user_id}/reset-password` | Admin | Issue a new password |
+
+### Problem management (`routers/problems.py`)
+
+| Method | Path | Access | Purpose |
+| --- | --- | --- | --- |
+| GET | `/admin/languages` | Staff | Languages a problem may allow |
+| GET | `/admin/problems` | Staff | Every problem with its status and build state |
+| POST | `/admin/problems` | Staff | Create an empty draft |
+| GET | `/admin/problems/{problem_id}` | Staff | The problem for the editor |
+| PATCH | `/admin/problems/{problem_id}` | Staff | Save the editor. A new version and build start only when something that affects judging changed. |
+| DELETE | `/admin/problems/{problem_id}` | Staff | Delete a problem nobody has submitted to (otherwise archive it) |
+| POST | `/admin/problems/{problem_id}/enable` | Staff | Show it to students |
+| POST | `/admin/problems/{problem_id}/disable` | Staff | Hide it from students |
+| POST | `/admin/problems/{problem_id}/archive` | Staff | Disable for good, read-only |
+| GET | `/admin/problems/{problem_id}/build` | Staff | Build state, cheap enough to poll |
+| POST | `/admin/problems/{problem_id}/build` | Staff | Build the newest version again, as a new version |
+| POST | `/admin/problems/{problem_id}/rejudge` | Staff | Judge all the problem's submissions again on its current version |
+| POST | `/admin/problems/{problem_id}/testdata` | Staff | Upload one test input. Returns the hash that a later save refers to. |
+| POST | `/admin/problems/{problem_id}/images` | Staff | Upload a statement image, linked as `/api/images/{id}` |
+
+### Solving and submissions (`routers/solve.py`, `routers/images.py`, `routers/submissions.py`)
+
+| Method | Path | Access | Purpose |
+| --- | --- | --- | --- |
+| GET | `/problems` | Signed in | Enabled problems with the caller's own score and status |
+| GET | `/problems/{slug}` | Signed in | Statement, limits, languages and sample cases. Staff can also open problems that aren't enabled (preview) and get the reference solution. Students get `404` for those. |
+| GET | `/images/{image_id}` | Signed in | A statement image. Students get `404` for images of problems that aren't enabled. |
+| POST | `/problems/{slug}/submissions` | Signed in | Submit a solution. Checks the killswitch and the rate limits (one per 10 s, at most 3 being judged). Staff submissions are test submissions. |
+| GET | `/submissions` | Signed in | The caller's own submissions, optionally for one problem |
+| GET | `/submissions/queue` | Signed in | How many submissions from everyone the judge hasn't started yet |
+| GET | `/submissions/{submission_id}` | Signed in | One submission and its report. Students only see their own. Staff also see hidden test data and checker messages. |
+| GET | `/submissions/{submission_id}/stream` | Signed in | Server-sent events with live progress until the result is final. The route checks the session cookie itself. |
+
+### Staff views and exports (`routers/admin_submissions.py`, `routers/progress.py`)
+
+| Method | Path | Access | Purpose |
+| --- | --- | --- | --- |
+| GET | `/admin/submissions` | Staff | All submissions, filtered by student, problem, verdict and date |
+| POST | `/admin/submissions/{submission_id}/rejudge` | Staff | Judge a finished submission again |
+| POST | `/admin/submissions/{submission_id}/requeue` | Staff | Send a delayed submission to the judge again |
+| GET | `/admin/export/submissions.csv` | Staff | Raw submissions CSV, with the same filters as the list |
+| GET | `/admin/progress` | Staff | Progress matrix: every student × problem |
+| GET | `/admin/export/scores.csv` | Staff | One row per active student with a score column per problem |
+
+### Settings and leaderboard (`routers/settings.py`, `routers/leaderboard.py`)
+
+| Method | Path | Access | Purpose |
+| --- | --- | --- | --- |
+| GET | `/settings` | Signed in | Whether submissions are open (with the banner message while closed), the leaderboard mode, and when it was frozen |
+| GET | `/settings/time` | Signed in | Server time and UTC offset, for the clock in the top bar |
+| PUT | `/admin/settings/submissions` | Admin | Submission killswitch (`submissions_open`) |
+| PUT | `/admin/settings/leaderboard` | Staff | Leaderboard mode: live, hidden or frozen |
+| GET | `/leaderboard` | Signed in | Standings. Staff always get live standings. Students get the mode staff chose: hidden returns `403` with code `leaderboard_hidden`. |
+
+### Clarifications (`routers/clarifications.py`)
+
+The UI shows thread controls from each thread's `permissions` field, which the backend computes.
+
+| Method | Path | Access | Purpose |
+| --- | --- | --- | --- |
+| GET | `/clarifications` | Signed in | Staff get the queue of every thread. Students get their own questions. |
+| POST | `/clarifications` | Staff | Post a course-wide announcement and notify every active student |
+| GET | `/clarifications/announcements` | Signed in | Course-wide announcements, pinned first, for the dashboard |
+| GET | `/clarifications/{clarification_id}` | Signed in | One thread with its replies |
+| PATCH | `/clarifications/{clarification_id}` | Signed in | Students edit their own question. Staff also set status, pin and visibility. |
+| DELETE | `/clarifications/{clarification_id}` | Signed in | Students delete their own question while it has no replies. Staff delete any thread. |
+| POST | `/clarifications/{clarification_id}/replies` | Signed in | Reply. A staff reply answers the question and notifies its author. |
+| PATCH | `/clarifications/{clarification_id}/replies/{reply_id}` | Signed in | Edit a reply: your own on a private thread, or any as staff |
+| DELETE | `/clarifications/{clarification_id}/replies/{reply_id}` | Signed in | Delete a reply: your own, or any as staff |
+| GET | `/problems/{slug}/clarifications` | Signed in | Threads on one problem that the caller may read |
+| POST | `/problems/{slug}/clarifications` | Signed in | Ask a question about a problem, or (staff) post an announcement on it |
+
+### Notifications (`routers/notifications.py`)
+
+| Method | Path | Access | Purpose |
+| --- | --- | --- | --- |
+| GET | `/notifications` | Signed in | The caller's notifications, paged |
+| GET | `/notifications/unread-count` | Signed in | Unread count for the bell |
+| POST | `/notifications/read-all` | Signed in | Mark everything read |
+| DELETE | `/notifications` | Signed in | Remove every notification already read (requires `read=true`) |
+| PATCH | `/notifications/{notification_id}` | Signed in | Mark one notification read or unread |
+| DELETE | `/notifications/{notification_id}` | Signed in | Dismiss one notification |
+| POST | `/admin/notifications` | Staff | Send a message to one active student or to all of them |
+
+### Operation log (`routers/logs.py`)
+
+| Method | Path | Access | Purpose |
+| --- | --- | --- | --- |
+| GET | `/admin/logs` | Admin | Audit log entries, filtered and paged |
+| GET | `/admin/logs/types` | Admin | The entry types, for the filter |
+
+### Judge and health (`routers/internal.py`, `main.py`)
+
+These aren't forwarded by the frontend. In production, the reverse proxy must allow `/internal/*` only from the judge network (see [Reverse proxy](#3-reverse-proxy)).
+
+| Method | Path | Access | Purpose |
+| --- | --- | --- | --- |
+| POST | `/internal/judge-events` | Judge | One judge event, or up to 50 when the worker replays its spool. Idempotent by event ID. |
+| POST | `/internal/judge-jobs/{job_id}/refresh` | Judge | The same job with fresh presigned URLs, for a job a worker reclaimed late |
+| GET | `/healthz` | Public | Liveness probe for the Docker health check. Doesn't touch the databases. |
 
 ## More documentation
 
